@@ -1,0 +1,34 @@
+[
+  {
+    "id": 1,
+    "transaction_id": "TX-20251102151946-59307e",
+    "cashier": "montana",
+    "total": 270.0,
+    "timestamp": "2025-11-02 15:19:46",
+    "status": "ACTIVE",
+    "void_reason": null,
+    "void_authorized_by": null,
+    "voided_at": null,
+    "is_voided": 0,
+    "adjustment_type": null,
+    "reason": null,
+    "authorized_by": null,
+    "original_sale_id": null
+  },
+  {
+    "id": 2,
+    "transaction_id": "TX-20251102152225-73ba7f",
+    "cashier": "montana",
+    "total": 2280.0,
+    "timestamp": "2025-11-02 15:22:25",
+    "status": "ACTIVE",
+    "void_reason": null,
+    "void_authorized_by": null,
+    "voided_at": null,
+    "is_voided": 0,
+    "adjustment_type": null,
+    "reason": null,
+    "authorized_by": null,
+    "original_sale_id": null
+  }
+]
