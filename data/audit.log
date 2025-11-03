@@ -200,3 +200,5 @@
 [2025-11-03 23:04:31] App closed and daily backup created.
 [2025-11-03 23:04:35] App closed and daily backup created.
 [2025-11-03 23:29:36] App closed and daily backup created.
+[2025-11-03 23:42:41] Payment processed by comfort TX=TX-20251103234241-cc82e7 Method=Cash Total=4000.0
+[2025-11-03 23:43:25] Payment processed by comfort TX=TX-20251103234325-affcd8 Method=Mobile Money Total=2000.0

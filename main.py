@@ -1008,7 +1008,7 @@ def show_main_app():
                 messagebox.showinfo("Low Stock Alert", "All items are sufficiently stocked.")
 
         def clear_all_stock():
-            """Admin-only: set all inventory quantities to zero after verifying admin password."""
+            """Admin-only: Wipe everything - clear inventory and delete all sales records."""
             import sqlite3
             from tkinter import simpledialog
             import sales_utils
@@ -1023,17 +1023,39 @@ def show_main_app():
             if not pwd or not sales_utils.check_password(pwd, user['password_hash']):
                 messagebox.showerror("Access Denied", "Invalid credentials.")
                 return
-            if not messagebox.askyesno("Confirm", "This will set ALL inventory quantities to 0. Continue?"):
+            if not messagebox.askyesno("Confirm Complete Wipe", 
+                "This will:\n"
+                "- Set ALL inventory quantities to 0\n"
+                "- Delete ALL sales records\n"
+                "- Delete ALL sale items\n"
+                "- Wipe ALL sales history\n\n"
+                "This action CANNOT be undone!\n\n"
+                "Continue?"):
                 return
             try:
                 conn = sqlite3.connect(sales_utils.DB_NAME)
                 cur = conn.cursor()
+                # Clear inventory quantities
                 cur.execute("UPDATE inventory SET quantity=0")
+                # Delete all sale items first (due to foreign key constraints)
+                cur.execute("DELETE FROM sale_items")
+                # Delete all sales records
+                cur.execute("DELETE FROM sales")
+                # Also clear legacy sales table if it exists
+                try:
+                    cur.execute("DELETE FROM sales_legacy")
+                except sqlite3.OperationalError:
+                    pass  # Table might not exist
                 conn.commit()
                 conn.close()
-                messagebox.showinfo("Stock Cleared", "All inventory quantities set to 0.")
+                messagebox.showinfo("Complete Wipe Successful", 
+                    "All data has been wiped:\n"
+                    "- Inventory quantities set to 0\n"
+                    "- All sales records deleted\n"
+                    "- All sale items deleted\n\n"
+                    "You can now start fresh!")
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to clear stock: {e}")
+                messagebox.showerror("Error", f"Failed to wipe data: {e}")
 
 
         # Admin control panel
