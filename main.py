@@ -178,31 +178,109 @@ def show_main_app():
     elif current_user['role'] == 'admin':
         # Admin: View sales log, dashboard, export, user management
         def view_sales():
-            import sqlite3
-            from tkinter import Toplevel, Text, Scrollbar, RIGHT, Y, END
+            """Aggregated per-item sales summary (each item listed once)"""
+            import sqlite3, csv, os
+            from tkinter import Toplevel, Frame, StringVar, Entry, Button, END
+            from tkinter import ttk
+
             win = Toplevel(root)
-            win.title("All Sales Log")
-            txt = Text(win, width=80, height=20)
-            txt.pack(side="left", fill="both", expand=True)
-            scrollbar = Scrollbar(win, command=txt.yview)
-            scrollbar.pack(side=RIGHT, fill=Y)
-            txt.config(yscrollcommand=scrollbar.set)
-            conn = sqlite3.connect("bar_sales.db")
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT s.cashier, si.item, si.quantity, si.unit_price, si.subtotal, s.timestamp 
-                FROM sales s 
-                JOIN sale_items si ON s.id = si.sale_id 
-                WHERE s.status != 'VOIDED'
-                ORDER BY s.timestamp DESC
-            """)
-            rows = cur.fetchall()
-            conn.close()
-            txt.insert(END, f"{'User':<10} {'Item':<15} {'Qty':<5} {'Unit Price':<10} {'Total':<10} {'Time':<20}\n")
-            txt.insert(END, "-"*75+"\n")
-            for row in rows:
-                txt.insert(END, f"{row[0]:<10} {row[1]:<15} {row[2]:<5} {row[3]:<10.2f} {row[4]:<10.2f} {row[5]:<20}\n")
-            txt.config(state="disabled")
+            win.title("Sales Summary (Items)")
+            win.geometry("720x480")
+
+            # Top controls (search + actions)
+            top = Frame(win)
+            top.pack(fill="x", padx=10, pady=8)
+
+            search_var = StringVar()
+            Entry(top, textvariable=search_var, width=28).pack(side="left", padx=(0, 6))
+            def do_export():
+                rows = [tree.item(i, "values") for i in tree.get_children()]
+                if not os.path.exists("exports"):
+                    os.makedirs("exports")
+                path = os.path.join("exports", "sales_item_summary.csv")
+                with open(path, "w", newline="", encoding="utf-8") as f:
+                    w = csv.writer(f)
+                    w.writerow(["Item", "Total Qty", "Total Sales", "Orders"])
+                    w.writerows(rows)
+                messagebox.showinfo("Export", f"Exported to:\n{path}")
+
+            Button(top, text="Search", command=lambda: apply_filter()).pack(side="left", padx=3)
+            Button(top, text="Refresh", command=lambda: load_data()).pack(side="left", padx=3)
+            Button(top, text="Export CSV", command=do_export).pack(side="left", padx=3)
+            Button(top, text="Close", command=win.destroy).pack(side="right")
+
+            # Treeview
+            cols = ("Item", "Qty", "Sales", "Orders")
+            tree = ttk.Treeview(win, columns=cols, show="headings", height=16)
+            for c in cols:
+                tree.heading(c, text=c)
+            tree.column("Item", width=320, anchor="w")
+            tree.column("Qty", width=80, anchor="e")
+            tree.column("Sales", width=100, anchor="e")
+            tree.column("Orders", width=80, anchor="e")
+            yscroll = ttk.Scrollbar(win, orient="vertical", command=tree.yview)
+            tree.configure(yscrollcommand=yscroll.set)
+            tree.pack(side="left", fill="both", expand=True, padx=(10,0), pady=(0,10))
+            yscroll.pack(side="right", fill="y", padx=(0,10), pady=(0,10))
+
+            all_rows = []
+
+            def load_data():
+                nonlocal all_rows
+                tree.delete(*tree.get_children())
+                # Aggregate per item across all non-voided sales
+                conn = sqlite3.connect("bar_sales.db")
+                cur = conn.cursor()
+                cur.execute("""
+                    SELECT si.item,
+                           SUM(si.quantity) AS total_qty,
+                           SUM(si.subtotal) AS total_sales,
+                           COUNT(DISTINCT s.id) AS orders
+                    FROM sales s
+                    JOIN sale_items si ON s.id = si.sale_id
+                    WHERE s.status != 'VOIDED'
+                    GROUP BY si.item
+                    ORDER BY total_qty DESC
+                """)
+                rows = cur.fetchall()
+                conn.close()
+                all_rows = rows
+                for item, qty, sales, orders in rows:
+                    tree.insert("", END, values=(item, int(qty or 0), f"{float(sales or 0):.2f}", int(orders or 0)))
+
+            def apply_filter():
+                q = (search_var.get() or "").strip().lower()
+                tree.delete(*tree.get_children())
+                for item, qty, sales, orders in all_rows:
+                    if q and q not in item.lower():
+                        continue
+                    tree.insert("", END, values=(item, int(qty or 0), f"{float(sales or 0):.2f}", int(orders or 0)))
+
+            # Enable column sorting
+            def sort_by(col, numeric=False):
+                data = [(tree.set(k, col), k) for k in tree.get_children("")]
+                if numeric:
+                    def to_num(v):
+                        try:
+                            return float(str(v).replace(",", ""))
+                        except:
+                            return 0.0
+                    data.sort(key=lambda x: to_num(x[0]))
+                else:
+                    data.sort(key=lambda x: x[0].lower())
+                # toggle direction
+                if getattr(sort_by, "rev_"+col, False):
+                    data.reverse()
+                setattr(sort_by, "rev_"+col, not getattr(sort_by, "rev_"+col, False))
+                for idx, (_, k) in enumerate(data):
+                    tree.move(k, "", idx)
+
+            tree.heading("Item", text="Item", command=lambda: sort_by("Item", numeric=False))
+            tree.heading("Qty", text="Qty", command=lambda: sort_by("Qty", numeric=True))
+            tree.heading("Sales", text="Sales", command=lambda: sort_by("Sales", numeric=True))
+            tree.heading("Orders", text="Orders", command=lambda: sort_by("Orders", numeric=True))
+
+            load_data()
 
         def user_management():
             import sqlite3

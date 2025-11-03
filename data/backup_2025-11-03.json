@@ -110,5 +110,21 @@
     "reason": null,
     "authorized_by": null,
     "original_sale_id": null
+  },
+  {
+    "id": 8,
+    "transaction_id": "TX-20251103145057-11a807",
+    "cashier": "comfort",
+    "total": 67.0,
+    "timestamp": "2025-11-03 14:50:57",
+    "status": "ACTIVE",
+    "void_reason": null,
+    "void_authorized_by": null,
+    "voided_at": null,
+    "is_voided": 0,
+    "adjustment_type": null,
+    "reason": null,
+    "authorized_by": null,
+    "original_sale_id": null
   }
 ]
