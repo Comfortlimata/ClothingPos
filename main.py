@@ -52,14 +52,7 @@ def restart_login():
 def login():
     username = entry_username.get()
     password = entry_password.get()
-    user = USERS.get(username)
-    if user and user['password'] == password:
-        current_user['username'] = username
-        current_user['role'] = user['role']
-        login_window.destroy()
-        show_main_app()
-        return
-    # Check database users
+    # Prefer database users if present
     from sales_utils import get_user, check_password
     db_user = get_user(username)
     if db_user and check_password(password, db_user['password_hash']):
@@ -67,14 +60,83 @@ def login():
         current_user['role'] = db_user['role']
         login_window.destroy()
         show_main_app()
+        return
+    # Fallback to hardcoded only if user not present in DB (legacy bootstrap)
+    user = USERS.get(username)
+    if (db_user is None) and user and user['password'] == password:
+        current_user['username'] = username
+        current_user['role'] = user['role']
+        login_window.destroy()
+        show_main_app()
     else:
         messagebox.showerror("Login Failed", "Invalid username or password.")
 
+def change_password_dialog(root):
+    """Allow the logged-in admin to change their password (requires current password)."""
+    from tkinter import Toplevel, Label, Entry, Button
+    from sales_utils import get_user, check_password, reset_user_password
+    if current_user.get('role') != 'admin':
+        messagebox.showerror("Access Denied", "Only admins can change their password here.")
+        return
+    win = Toplevel(root)
+    win.title("Change Password")
+    Label(win, text="Current Password:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
+    cur_entry = Entry(win, show='*')
+    cur_entry.grid(row=0, column=1, padx=5, pady=5)
+    Label(win, text="New Password:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
+    new_entry = Entry(win, show='*')
+    new_entry.grid(row=1, column=1, padx=5, pady=5)
+    Label(win, text="Confirm Password:").grid(row=2, column=0, sticky='e', padx=5, pady=5)
+    conf_entry = Entry(win, show='*')
+    conf_entry.grid(row=2, column=1, padx=5, pady=5)
+
+    def do_change():
+        cur = cur_entry.get()
+        newp = new_entry.get()
+        conf = conf_entry.get()
+        user = get_user(current_user['username'])
+        if not user or not check_password(cur, user['password_hash']):
+            messagebox.showerror("Error", "Current password is incorrect.")
+            return
+        if not newp or len(newp) < 4:
+            messagebox.showerror("Invalid Password", "Password must be at least 4 characters.")
+            return
+        if newp != conf:
+            messagebox.showerror("Mismatch", "Passwords do not match.")
+            return
+        if reset_user_password(current_user['username'], newp):
+            messagebox.showinfo("Success", "Password updated.")
+            win.destroy()
+        else:
+            messagebox.showerror("Error", "Failed to update password.")
+
+    Button(win, text="Update Password", command=do_change).grid(row=3, column=0, columnspan=2, pady=10)
+
 def show_main_app():
     root = tk.Tk()
-    root.title("🍻 Bar Sales – Comfort_2022")
-    root.geometry("900x700")
+    root.title("CASHIER – POS SYSTEM")
+    try:
+        root.state('zoomed')
+    except Exception:
+        root.geometry("1280x800")
     root.configure(bg='#ecf0f1')
+    
+    # Optional theme via ttkbootstrap
+    try:
+        import ttkbootstrap as tb  # type: ignore
+        from ttkbootstrap import Style  # noqa: F401
+        tb.Style(theme='flatly')
+    except Exception:
+        pass
+
+    # Global ttk style tweaks
+    try:
+        style = ttk.Style()
+        style.configure('TButton', font=('Segoe UI', 11, 'bold'), padding=6)
+        style.configure('Treeview', font=('Segoe UI', 10), rowheight=26)
+        style.configure('Treeview.Heading', font=('Segoe UI', 10, 'bold'))
+    except Exception:
+        pass
     
     # Enhanced header with gradient-like effect
     header_frame = tk.Frame(root, bg='#34495e', height=70)
@@ -178,14 +240,17 @@ def show_main_app():
     elif current_user['role'] == 'admin':
         # Admin: View sales log, dashboard, export, user management
         def view_sales():
-            """Aggregated per-item sales summary (each item listed once)"""
+            """Admin sales dashboard: headers with reference/comment + item summary."""
             import sqlite3, csv, os
             from tkinter import Toplevel, Frame, StringVar, Entry, Button, END
             from tkinter import ttk
 
             win = Toplevel(root)
-            win.title("Sales Summary (Items)")
-            win.geometry("720x480")
+            win.title("VIEW SALES – ADMIN DASHBOARD")
+            try:
+                win.state('zoomed')
+            except Exception:
+                win.geometry("1200x700")
 
             # Top controls (search + actions)
             top = Frame(win)
@@ -193,6 +258,23 @@ def show_main_app():
 
             search_var = StringVar()
             Entry(top, textvariable=search_var, width=28).pack(side="left", padx=(0, 6))
+            # Header filters
+            header_ref_var = StringVar()
+            Entry(top, textvariable=header_ref_var, width=22).pack(side="left", padx=(0,6))
+            method_var = StringVar(value="All")
+            method_menu = ttk.Combobox(top, textvariable=method_var, values=["All","Cash","Mobile Money","Card"], width=14, state='readonly')
+            method_menu.pack(side='left', padx=(0,6))
+            # Date range (optional)
+            try:
+                from tkcalendar import DateEntry as _DE
+                start_date = _DE(top, date_pattern='yyyy-mm-dd', width=12)
+                end_date = _DE(top, date_pattern='yyyy-mm-dd', width=12)
+                start_date.pack(side='left', padx=(0,4))
+                end_date.pack(side='left', padx=(0,6))
+            except Exception:
+                start_date = None
+                end_date = None
+
             def do_export():
                 rows = [tree.item(i, "values") for i in tree.get_children()]
                 if not os.path.exists("exports"):
@@ -209,9 +291,28 @@ def show_main_app():
             Button(top, text="Export CSV", command=do_export).pack(side="left", padx=3)
             Button(top, text="Close", command=win.destroy).pack(side="right")
 
-            # Treeview
+            # Sales headers with ref/comment
+            headers_frame = Frame(win)
+            headers_frame.pack(fill='both', expand=True, padx=10, pady=(0,8))
+            header_cols = ("ID","TxID","Cashier","Total","Time","Status","Method","Ref No","Comment")
+            headers_tree = ttk.Treeview(headers_frame, columns=header_cols, show='headings', height=12)
+            for c in header_cols:
+                headers_tree.heading(c, text=c)
+                headers_tree.column(c, width=120, anchor='w' if c in ("TxID","Comment") else 'e')
+            hscroll = ttk.Scrollbar(headers_frame, orient="vertical", command=headers_tree.yview)
+            headers_tree.configure(yscrollcommand=hscroll.set)
+            headers_tree.pack(side='left', fill='both', expand=True)
+            hscroll.pack(side='right', fill='y')
+
+            # Summary panel
+            summary = Frame(win)
+            summary.pack(fill='x', padx=10, pady=(0,8))
+            total_label = tk.Label(summary, text="Total Sales: ZMW 0.00   Transactions: 0   Top Item: -", font=('Arial', 11, 'bold'))
+            total_label.pack(anchor='w')
+
+            # Item aggregation treeview
             cols = ("Item", "Qty", "Sales", "Orders")
-            tree = ttk.Treeview(win, columns=cols, show="headings", height=16)
+            tree = ttk.Treeview(win, columns=cols, show="headings", height=12)
             for c in cols:
                 tree.heading(c, text=c)
             tree.column("Item", width=320, anchor="w")
@@ -231,6 +332,44 @@ def show_main_app():
                 # Aggregate per item across all non-voided sales
                 conn = sqlite3.connect("bar_sales.db")
                 cur = conn.cursor()
+                # Headers
+                headers_tree.delete(*headers_tree.get_children())
+                cur.execute("""
+                    SELECT id, transaction_id, cashier, total, timestamp, status, 
+                           COALESCE(payment_method,''), COALESCE(reference_no,''), COALESCE(comment,'')
+                    FROM sales
+                    ORDER BY timestamp DESC
+                    LIMIT 200
+                """)
+                header_rows = cur.fetchall()
+                # Apply filters
+                ref_filter = (header_ref_var.get() or '').strip().lower()
+                method_filter = method_var.get()
+                def in_date_range(ts: str) -> bool:
+                    if start_date and end_date:
+                        try:
+                            s = start_date.get_date().strftime('%Y-%m-%d')
+                            e = end_date.get_date().strftime('%Y-%m-%d')
+                            d = ts[:10]
+                            return (s <= d <= e)
+                        except Exception:
+                            return True
+                    return True
+                filtered_headers = []
+                for r in header_rows:
+                    _id, _tx, _cashier, _tot, _ts, _st, _pm, _ref, _cmt = r
+                    if ref_filter and ref_filter not in (_ref or '').lower():
+                        continue
+                    if method_filter != 'All' and (_pm or '') != method_filter:
+                        continue
+                    if not in_date_range(_ts or ''):
+                        continue
+                    filtered_headers.append(r)
+                # Striped rows
+                headers_tree.tag_configure('odd', background='#f9f9f9')
+                headers_tree.tag_configure('even', background='#ffffff')
+                for i, r in enumerate(filtered_headers):
+                    headers_tree.insert("", END, values=r, tags=('even' if i % 2 == 0 else 'odd',))
                 cur.execute("""
                     SELECT si.item,
                            SUM(si.quantity) AS total_qty,
@@ -245,8 +384,16 @@ def show_main_app():
                 rows = cur.fetchall()
                 conn.close()
                 all_rows = rows
-                for item, qty, sales, orders in rows:
-                    tree.insert("", END, values=(item, int(qty or 0), f"{float(sales or 0):.2f}", int(orders or 0)))
+                tree.tag_configure('odd', background='#f9f9f9')
+                tree.tag_configure('even', background='#ffffff')
+                for i, (item, qty, sales, orders) in enumerate(rows):
+                    tree.insert("", END, values=(item, int(qty or 0), f"{float(sales or 0):.2f}", int(orders or 0)), tags=('even' if i % 2 == 0 else 'odd',))
+                # Summary
+                if rows:
+                    total_sales = sum(float(r[2] or 0) for r in rows)
+                    total_tx = len(set([h[0] for h in filtered_headers])) if filtered_headers else 0
+                    top_item = rows[0][0]
+                    total_label.config(text=f"Total Sales: ZMW {total_sales:.2f}   Transactions: {total_tx}   Top Item: {top_item}")
 
             def apply_filter():
                 q = (search_var.get() or "").strip().lower()
@@ -498,6 +645,10 @@ def show_main_app():
             from datetime import datetime, timedelta
             win = Toplevel(root)
             win.title("Export All Sales - Options")
+            try:
+                win.state('zoomed')
+            except Exception:
+                win.geometry("1000x600")
             # Get min/max dates from sales
             conn = sqlite3.connect('bar_sales.db')
             cur = conn.cursor()
@@ -732,6 +883,8 @@ def show_main_app():
                  bg='#9b59b6', fg='white', font=('Arial', 10, 'bold'), pady=8).pack(side='left', fill='x', expand=True, padx=5)
         tk.Button(row1_frame, text="User Management", command=user_management, 
                  bg='#e67e22', fg='white', font=('Arial', 10, 'bold'), pady=8).pack(side='left', fill='x', expand=True, padx=(5, 0))
+        tk.Button(row1_frame, text="Change Password", command=lambda: change_password_dialog(root),
+                 bg='#2c3e50', fg='white', font=('Arial', 10, 'bold'), pady=8).pack(side='left', fill='x', expand=True, padx=(5, 0))
         
         # Row 2: Export functions
         row2_frame = tk.Frame(admin_frame, bg='#f0f0f0')
@@ -1137,6 +1290,12 @@ def create_cashier_interface(main_frame, root):
     cart_tree = ttk.Treeview(right_panel, columns=cart_columns, show='headings', height=12)
     cart_tree.pack(fill='both', expand=True, padx=5, pady=5)
     
+    try:
+        cart_tree.tag_configure('odd', background='#f9f9f9')
+        cart_tree.tag_configure('even', background='#ffffff')
+    except Exception:
+        pass
+    
     for c in cart_columns:
         cart_tree.heading(c, text=c)
         if c == "Item":
@@ -1159,11 +1318,11 @@ def create_cashier_interface(main_frame, root):
         for i in cart_tree.get_children():
             cart_tree.delete(i)
             
-        for it in cart:
+        for idx, it in enumerate(cart):
             subtotal = float(it['quantity']) * float(it['unit_price'])
             cart_tree.insert('', 'end', values=(it['item'], it['quantity'], 
                                               f"{float(it['unit_price']):.2f}", 
-                                              f"{subtotal:.2f}"))
+                                              f"{subtotal:.2f}"), tags=('even' if idx % 2 == 0 else 'odd',))
         
         # Update total
         cart_total = sum(float(it['quantity']) * float(it['unit_price']) for it in cart)
@@ -1389,8 +1548,11 @@ def create_cashier_interface(main_frame, root):
         
         # Payment dialog
         payment_dialog = tk.Toplevel(root)
-        payment_dialog.title("Process Payment")
-        payment_dialog.geometry("400x350")
+        payment_dialog.title("PROCESS PAYMENT – POS SYSTEM")
+        try:
+            payment_dialog.state('zoomed')
+        except Exception:
+            payment_dialog.geometry("900x600")
         payment_dialog.configure(bg='#f8f9fa')
         payment_dialog.transient(root)
         payment_dialog.grab_set()
@@ -1435,11 +1597,15 @@ def create_cashier_interface(main_frame, root):
         mobile_label = tk.Label(input_frame, text="Transaction Reference:", bg='#f8f9fa', font=('Arial', 11))
         mobile_entry = tk.Entry(input_frame, textvariable=mobile_ref, font=('Arial', 11), width=25)
         
+        comment_label = tk.Label(input_frame, text="Comment (optional):", bg='#f8f9fa', font=('Arial', 11))
+        comment_var = tk.StringVar()
+        comment_entry = tk.Entry(input_frame, textvariable=comment_var, font=('Arial', 11), width=40)
+        
         change_label = tk.Label(input_frame, text="", bg='#f8f9fa', font=('Arial', 12, 'bold'), fg='#e74c3c')
         
         def update_payment_fields(*args):
             # Hide all fields first
-            for widget in [cash_label, cash_entry, mobile_label, mobile_entry, change_label]:
+            for widget in [cash_label, cash_entry, mobile_label, mobile_entry, comment_label, comment_entry, change_label]:
                 widget.pack_forget()
             
             if payment_type.get() == "Cash":
@@ -1450,6 +1616,8 @@ def create_cashier_interface(main_frame, root):
             elif payment_type.get() == "Mobile Money":
                 mobile_label.pack(anchor='w', pady=(5,2))
                 mobile_entry.pack(anchor='w', pady=(0,5))
+                comment_label.pack(anchor='w', pady=(5,2))
+                comment_entry.pack(anchor='w', pady=(0,5))
                 mobile_entry.focus_set()
             validate_input()
         
@@ -1507,7 +1675,7 @@ def create_cashier_interface(main_frame, root):
                     return
             elif payment_method == "Mobile Money":
                 if not mobile_ref.get().strip():
-                    messagebox.showerror("Error", "Please enter transaction reference")
+                    messagebox.showerror("Missing Reference", "Mobile payment requires a reference number.")
                     return
                 received = total_amount
                 change = 0
@@ -1537,14 +1705,14 @@ def create_cashier_interface(main_frame, root):
                 ref = mobile_ref.get().strip() if payment_method == "Mobile Money" else (None if payment_method == "Cash" else None)
                 try:
                     if hasattr(sales_utils, 'set_sale_payment') and callable(sales_utils.set_sale_payment):
-                        sales_utils.set_sale_payment(sale_id, payment_method, reference_no=ref, comment=None)
+                        sales_utils.set_sale_payment(sale_id, payment_method, reference_no=ref, comment=comment_var.get().strip() or None)
                     else:
                         # fallback: update sales row directly (keeps same fields used by admin view)
                         import sqlite3
                         conn = sqlite3.connect(sales_utils.DB_NAME)
                         cur = conn.cursor()
-                        updates = ["status=?","payment_method=?"]
-                        params = ['COMPLETED', payment_method]
+                        updates = ["status=?","payment_method=?","comment=?"]
+                        params = ['COMPLETED', payment_method, (comment_var.get().strip() or None)]
                         if ref is not None:
                             updates.append("reference_no=?"); params.append(ref)
                         # optional comment left as None
@@ -1583,6 +1751,7 @@ def create_cashier_interface(main_frame, root):
         payment_type.trace('w', update_payment_fields)
         cash_received.trace('w', calculate_change)
         mobile_ref.trace('w', validate_input)
+        comment_var.trace('w', validate_input)
         
         # Initialize fields
         update_payment_fields()
@@ -1644,6 +1813,15 @@ if not os.path.exists('bar_sales.db'):
 sales_utils.init_db()
 sales_utils.backup_today_sales()
 
+# Seed default users in DB if missing (prevents reliance on hardcoded users)
+try:
+    if not sales_utils.get_user('admin'):
+        sales_utils.create_user('admin', 'admin123', 'admin')
+    if not sales_utils.get_user('cashier'):
+        sales_utils.create_user('cashier', 'cashier123', 'cashier')
+except Exception:
+    pass
+
 import atexit
 def on_app_close():
     sales_utils.backup_today_sales()
@@ -1674,5 +1852,8 @@ entry_password.grid(row=2, column=1)
 
 login_btn = tk.Button(login_frame, text="Login", command=login)
 login_btn.grid(row=3, column=0, columnspan=2, pady=10)
+
+# Bind Enter to login on bottom UI
+entry_password.bind('<Return>', lambda e: login())
 
 login_window.mainloop()

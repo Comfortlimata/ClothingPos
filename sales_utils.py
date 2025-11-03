@@ -73,6 +73,21 @@ def ensure_cart_schema():
         cur.execute("CREATE INDEX IF NOT EXISTS idx_sales_ts ON sales(timestamp)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items(sale_id)")
 
+        # Ensure payment-related columns exist on sales header
+        existing_cols = set(_table_columns(conn, 'sales'))
+        alter_statements = []
+        if 'payment_method' not in existing_cols:
+            alter_statements.append("ALTER TABLE sales ADD COLUMN payment_method TEXT DEFAULT NULL")
+        if 'reference_no' not in existing_cols:
+            alter_statements.append("ALTER TABLE sales ADD COLUMN reference_no TEXT DEFAULT NULL")
+        if 'comment' not in existing_cols:
+            alter_statements.append("ALTER TABLE sales ADD COLUMN comment TEXT DEFAULT NULL")
+        for stmt in alter_statements:
+            try:
+                cur.execute(stmt)
+            except sqlite3.OperationalError:
+                pass
+
         conn.commit()
     finally:
         conn.close()
@@ -171,6 +186,43 @@ def get_user(username):
     if row:
         return {'username': row[0], 'password_hash': row[1], 'role': row[2]}
     return None
+
+def set_sale_payment(sale_id: int, payment_method: str, reference_no: Optional[str] = None, comment: Optional[str] = None) -> bool:
+    """Persist payment details for a sale header and mark sale as COMPLETED."""
+    ensure_cart_schema()
+    conn = sqlite3.connect(DB_NAME, timeout=10)
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "UPDATE sales SET status='COMPLETED', payment_method=?, reference_no=?, comment=? WHERE id=?",
+            (payment_method, reference_no, comment, sale_id)
+        )
+        conn.commit()
+        return cur.rowcount == 1
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+def reset_user_password(username: str, new_password: str) -> bool:
+    """Reset a user's password by updating the password_hash.
+    Returns True on success, False if user not found or update failed.
+    """
+    conn = sqlite3.connect(DB_NAME, timeout=10)
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id FROM users WHERE username=?", (username,))
+        row = cur.fetchone()
+        if not row:
+            return False
+        new_hash = hash_password(new_password)
+        cur.execute("UPDATE users SET password_hash=? WHERE username=?", (new_hash, username))
+        conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
 
 # =========================
 # Inventory helpers
@@ -757,7 +809,7 @@ def export_all_sales_to_csv(start_date, end_date, selected_columns, export_forma
     import csv
     ensure_cart_schema()
     # Validate against new header columns
-    valid_cols = { 'id','transaction_id','cashier','total','timestamp','status','void_reason','void_authorized_by','voided_at' }
+    valid_cols = { 'id','transaction_id','cashier','total','timestamp','status','void_reason','void_authorized_by','voided_at','payment_method','reference_no','comment' }
     cols = [c for c in selected_columns if c in valid_cols]
     if not cols:
         cols = ['id','transaction_id','cashier','total','timestamp','status']
