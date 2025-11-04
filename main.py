@@ -156,41 +156,35 @@ def show_main_app():
     tk.Label(user_frame, text=welcome_text, 
              bg='#34495e', fg='#ecf0f1', font=('Arial', 14, 'bold')).pack(side='left')
     
-    # --- Session Timeout (Fixed) ---
+    # --- Session Timeout (disabled) ---
+    # The timeout used to schedule root.after callbacks which could fire after the
+    # window was destroyed and produce Tcl errors. Disable by default to avoid
+    # race conditions. Leave functions in place so timeout can be re-enabled later.
     SESSION_TIMEOUT_MS = 10 * 60 * 1000  # 10 minutes in milliseconds
-    timeout_timer = {'id': None, 'active': True}  # Use dict instead of list
+    timeout_timer = {'id': None, 'active': False}  # disabled to prevent after-callback race
 
     def logout_due_to_timeout():
-        if not timeout_timer['active']:
-            return
-        try:
-            if root.winfo_exists():  # Check if window still exists
-                messagebox.showwarning("Session Timeout", "You have been logged out due to inactivity.")
-                cleanup_and_logout()
-        except tk.TclError:
-            pass  # Window already destroyed
+        # no-op while timeout is disabled
+        return
 
     def reset_timeout(event=None):
-        if not timeout_timer['active']:
-            return
-        try:
-            if timeout_timer['id'] and root.winfo_exists():
-                root.after_cancel(timeout_timer['id'])
-            if root.winfo_exists():
-                timeout_timer['id'] = root.after(SESSION_TIMEOUT_MS, logout_due_to_timeout)
-        except tk.TclError:
-            pass  # Window already destroyed
+        # no-op while timeout is disabled
+        return
 
     def cleanup_and_logout():
+        # Ensure no after callbacks remain and safely restart login
         timeout_timer['active'] = False
-        if timeout_timer['id']:
-            try:
-                root.after_cancel(timeout_timer['id'])
-            except tk.TclError:
-                pass
+        try:
+            if timeout_timer.get('id'):
+                try:
+                    root.after_cancel(timeout_timer['id'])
+                except Exception:
+                    pass
+        except Exception:
+            pass
         try:
             root.destroy()
-        except tk.TclError:
+        except Exception:
             pass
         restart_login()
     
@@ -235,10 +229,6 @@ def show_main_app():
     # --- End Session Timeout ---
 
     if current_user['role'] == 'cashier':
-        create_cashier_interface(main_frame, root)
-
-    elif current_user['role'] == 'admin':
-        # Admin: View sales log, dashboard, export, user management
         def view_sales_modern():
             """Modern 'View Sales' window with grouped sales and summary cards."""
             import sqlite3
@@ -272,23 +262,24 @@ def show_main_app():
             Label(header_frame, text="Sales Overview", bg=BG_COLOR, fg=TEXT_COLOR, font=(FONT_FAMILY, 24, 'bold')).pack(side='left')
             
             refresh_btn = Button(header_frame, text="🔄 Refresh Sales", command=lambda: load_data(), relief='flat', bg=BLUE_COLOR, fg='white', font=(FONT_FAMILY, 10, 'bold'), padx=10, pady=5)
-            refresh_btn.pack(side='right')
+            refresh_btn.pack(side='right', padx=(0, 10))
+
+            dark_mode_var = tk.BooleanVar(value=False)
+            dark_mode_btn = Button(header_frame, text="🌙 Dark Mode", command=lambda: toggle_dark_mode(), relief='flat', bg='#333', fg='white', font=(FONT_FAMILY, 10, 'bold'), padx=10, pady=5)
+            dark_mode_btn.pack(side='right')
 
             # --- Summary Cards ---
             summary_frame = Frame(main_frame, bg=BG_COLOR)
             summary_frame.pack(fill='x', pady=(0, 20))
 
             def create_summary_card(parent, title, value_bg):
-                card = Frame(parent, bg=CARD_COLOR, relief='flat', borderwidth=0)
+                card = Frame(parent, bg=CARD_COLOR, relief='flat', borderwidth=0, padx=12, pady=8)
                 card.pack(side='left', expand=True, fill='x', padx=10)
                 
-                # Add a shadow effect
-                shadow = Frame(card, bg='#e0e0e0', height=2)
-                shadow.pack(side='bottom', fill='x')
-
-                Label(card, text=title, bg=CARD_COLOR, fg='#666', font=(FONT_FAMILY, 12)).pack(pady=(10, 0))
-                value_label = Label(card, text="ZMW 0.00", bg=CARD_COLOR, fg=value_bg, font=(FONT_FAMILY, 20, 'bold'))
-                value_label.pack(pady=(0, 10))
+                # Subtle separator
+                Label(card, text=title, bg=CARD_COLOR, fg='#666', font=(FONT_FAMILY, 12)).pack(pady=(6, 0))
+                value_label = Label(card, text="ZMW 0.00", bg=CARD_COLOR, fg=value_bg, font=(FONT_FAMILY, 18, 'bold'))
+                value_label.pack(pady=(4, 6))
                 return value_label
 
             total_sales_label = create_summary_card(summary_frame, "💰 Total Daily Sales", GREEN_COLOR)
@@ -312,27 +303,37 @@ def show_main_app():
             search_entry.pack(side='left', padx=(0, 10))
             search_entry.insert(0, "Search for an item...")
 
-            # --- Grouped Sales Table ---
-            grouped_frame = Frame(main_frame, bg=CARD_COLOR)
-            grouped_frame.pack(fill='x', pady=(10, 10))
-            Label(grouped_frame, text="Grouped Sales Summary", bg=CARD_COLOR, fg=TEXT_COLOR, font=(FONT_FAMILY, 16, 'bold')).pack(anchor='w', padx=10, pady=(10, 5))
+            # --- Middle area: two-column layout (grouped on left, detailed on right) ---
+            middle_frame = Frame(main_frame, bg=BG_COLOR)
+            middle_frame.pack(fill='both', expand=True)
+
+            left_col = Frame(middle_frame, bg=BG_COLOR)
+            left_col.pack(side='left', fill='y', expand=False, padx=(0,10), pady=5)
+
+            right_col = Frame(middle_frame, bg=CARD_COLOR)
+            right_col.pack(side='right', fill='both', expand=True, pady=5)
+
+            # --- Grouped Sales Table (left column) ---
+            grouped_frame = Frame(left_col, bg=CARD_COLOR, padx=8, pady=8, relief='groove', borderwidth=1)
+            grouped_frame.pack(fill='y', expand=False)
+            Label(grouped_frame, text="Grouped Sales Summary", bg=CARD_COLOR, fg=TEXT_COLOR, font=(FONT_FAMILY, 16, 'bold')).pack(anchor='w', padx=6, pady=(6, 4))
 
             style = ttk.Style()
-            style.configure("Modern.Treeview", font=(FONT_FAMILY, 10), rowheight=28, background=CARD_COLOR, fieldbackground=CARD_COLOR, foreground=TEXT_COLOR)
+            style.configure("Modern.Treeview", font=(FONT_FAMILY, 10), rowheight=26, background=CARD_COLOR, fieldbackground=CARD_COLOR, foreground=TEXT_COLOR)
             style.configure("Modern.Treeview.Heading", font=(FONT_FAMILY, 11, 'bold'), background=BLUE_COLOR, foreground='white', relief='flat')
             style.map("Modern.Treeview.Heading", background=[('active', '#3a6ee8')])
 
             grouped_cols = ("Product", "Quantity", "Total (ZMW)")
-            grouped_tree = ttk.Treeview(grouped_frame, columns=grouped_cols, show='headings', style="Modern.Treeview", height=5)
+            grouped_tree = ttk.Treeview(grouped_frame, columns=grouped_cols, show='headings', style="Modern.Treeview", height=12)
             for col in grouped_cols:
                 grouped_tree.heading(col, text=col)
-                grouped_tree.column(col, anchor='w' if col == "Product" else 'e')
-            grouped_tree.pack(fill='x', padx=10, pady=(0, 10))
+                grouped_tree.column(col, anchor='w' if col == "Product" else 'e', width=140 if col == 'Product' else 80)
+            grouped_tree.pack(fill='y', expand=False, padx=6, pady=(0,6))
 
-            # --- Detailed Sales Table ---
-            detailed_frame = Frame(main_frame, bg=CARD_COLOR)
+            # --- Detailed Sales Table (right column) ---
+            detailed_frame = Frame(right_col, bg=CARD_COLOR, padx=8, pady=8, relief='groove', borderwidth=1)
             detailed_frame.pack(fill='both', expand=True)
-            Label(detailed_frame, text="Detailed Sales Log", bg=CARD_COLOR, fg=TEXT_COLOR, font=(FONT_FAMILY, 16, 'bold')).pack(anchor='w', padx=10, pady=(10, 5))
+            Label(detailed_frame, text="Detailed Sales Log", bg=CARD_COLOR, fg=TEXT_COLOR, font=(FONT_FAMILY, 16, 'bold')).pack(anchor='w', padx=6, pady=(6, 4))
 
             detailed_cols = ("Product", "Quantity", "Total (ZMW)", "Payment Method", "Comment", "Date/Time")
             detailed_tree = ttk.Treeview(detailed_frame, columns=detailed_cols, show='headings', style="Modern.Treeview")
@@ -344,15 +345,16 @@ def show_main_app():
                     anchor = 'e'
                 elif col == "Payment Method":
                     anchor = 'center'
-                detailed_tree.column(col, anchor=anchor, width=120)
+                detailed_tree.column(col, anchor=anchor, width=140 if col=='Product' else 110)
 
             detailed_tree.tag_configure('Cash', background=GREEN_COLOR, foreground='white')
             detailed_tree.tag_configure('Mobile', background=BLUE_COLOR, foreground='white')
             detailed_tree.tag_configure('oddrow', background='#f9f9f9')
             detailed_tree.tag_configure('evenrow', background=CARD_COLOR)
 
-            detailed_tree.pack(fill='both', expand=True, padx=10, pady=(0, 10))
+            detailed_tree.pack(fill='both', expand=True, padx=6, pady=(0,6))
 
+            # --- Data loading & helpers (unchanged logic) ---
             def load_data():
                 # Clear tables
                 grouped_tree.delete(*grouped_tree.get_children())
@@ -449,6 +451,286 @@ def show_main_app():
             search_var.trace("w", lambda name, index, mode: load_data())
             period_menu.bind('<<ComboboxSelected>>', lambda e: load_data())
             payment_filter_menu.bind('<<ComboboxSelected>>', lambda e: load_data())
+
+            def toggle_dark_mode():
+                is_dark = dark_mode_var.get()
+                dark_mode_var.set(not is_dark)
+                if not is_dark:
+                    # Dark mode colors
+                    win.configure(bg='#1e293b')
+                    main_frame.configure(bg='#1e293b')
+                    header_frame.configure(bg='#1e293b')
+                    controls_frame.configure(bg='#1e293b')
+                    summary_frame.configure(bg='#1e293b')
+                    grouped_frame.configure(bg='#0f172a')
+                    detailed_frame.configure(bg='#0f172a')
+                    style.configure("Modern.Treeview", background='#0f172a', fieldbackground='#0f172a', foreground='#e2e8f0')
+                    dark_mode_btn.config(text="☀️ Light Mode")
+                else:
+                    # Light mode colors
+                    win.configure(bg=BG_COLOR)
+                    main_frame.configure(bg=BG_COLOR)
+                    header_frame.configure(bg=BG_COLOR)
+                    controls_frame.configure(bg=BG_COLOR)
+                    summary_frame.configure(bg=BG_COLOR)
+                    grouped_frame.configure(bg=CARD_COLOR)
+                    detailed_frame.configure(bg=CARD_COLOR)
+                    style.configure("Modern.Treeview", background=CARD_COLOR, fieldbackground=CARD_COLOR, foreground=TEXT_COLOR)
+                    dark_mode_btn.config(text="🌙 Dark Mode")
+
+            load_data() # Initial load
+        create_cashier_interface(main_frame, root, view_sales_modern)
+
+    elif current_user['role'] == 'admin':
+        # Admin: View sales log, dashboard, export, user management
+        def view_sales_modern():
+            """Modern 'View Sales' window with grouped sales and summary cards."""
+            import sqlite3
+            from tkinter import Toplevel, Frame, StringVar, Button, Label, ttk
+            from datetime import date, timedelta
+
+            # --- UI Configuration ---
+            BG_COLOR = '#f4f7ff'
+            CARD_COLOR = '#ffffff'
+            TEXT_COLOR = '#333333'
+            GREEN_COLOR = '#3DDC97'
+            BLUE_COLOR = '#4C7EFF'
+            FONT_FAMILY = "Poppins"
+
+            win = Toplevel(root)
+            win.title("View Sales")
+            win.configure(bg=BG_COLOR)
+            try:
+                win.state('zoomed')
+            except Exception:
+                win.geometry("1400x850")
+
+            # --- Main Layout ---
+            main_frame = Frame(win, bg=BG_COLOR, padx=20, pady=20)
+            main_frame.pack(fill='both', expand=True)
+
+            # --- Header ---
+            header_frame = Frame(main_frame, bg=BG_COLOR)
+            header_frame.pack(fill='x', pady=(0, 20))
+            
+            Label(header_frame, text="Sales Overview", bg=BG_COLOR, fg=TEXT_COLOR, font=(FONT_FAMILY, 24, 'bold')).pack(side='left')
+            
+            refresh_btn = Button(header_frame, text="🔄 Refresh Sales", command=lambda: load_data(), relief='flat', bg=BLUE_COLOR, fg='white', font=(FONT_FAMILY, 10, 'bold'), padx=10, pady=5)
+            refresh_btn.pack(side='right', padx=(0, 10))
+
+            dark_mode_var = tk.BooleanVar(value=False)
+            dark_mode_btn = Button(header_frame, text="🌙 Dark Mode", command=lambda: toggle_dark_mode(), relief='flat', bg='#333', fg='white', font=(FONT_FAMILY, 10, 'bold'), padx=10, pady=5)
+            dark_mode_btn.pack(side='right')
+
+            # --- Summary Cards ---
+            summary_frame = Frame(main_frame, bg=BG_COLOR)
+            summary_frame.pack(fill='x', pady=(0, 20))
+
+            def create_summary_card(parent, title, value_bg):
+                card = Frame(parent, bg=CARD_COLOR, relief='flat', borderwidth=0, padx=12, pady=8)
+                card.pack(side='left', expand=True, fill='x', padx=10)
+                
+                # Subtle separator
+                Label(card, text=title, bg=CARD_COLOR, fg='#666', font=(FONT_FAMILY, 12)).pack(pady=(6, 0))
+                value_label = Label(card, text="ZMW 0.00", bg=CARD_COLOR, fg=value_bg, font=(FONT_FAMILY, 18, 'bold'))
+                value_label.pack(pady=(4, 6))
+                return value_label
+
+            total_sales_label = create_summary_card(summary_frame, "💰 Total Daily Sales", GREEN_COLOR)
+            total_qty_label = create_summary_card(summary_frame, "🧾 Total Quantity Sold", BLUE_COLOR)
+            stock_remain_label = create_summary_card(summary_frame, "📦 Available Stock Remaining", '#f39c12')
+
+            # --- Controls ---
+            controls_frame = Frame(main_frame, bg=BG_COLOR)
+            controls_frame.pack(fill='x', pady=(0, 10))
+
+            period_var = StringVar(value='Today')
+            period_menu = ttk.Combobox(controls_frame, textvariable=period_var, state='readonly', values=['Today', 'Last 7 Days', 'Last 30 Days'], font=(FONT_FAMILY, 10))
+            period_menu.pack(side='left', padx=(0, 10))
+
+            payment_filter_var = StringVar(value='All')
+            payment_filter_menu = ttk.Combobox(controls_frame, textvariable=payment_filter_var, state='readonly', values=['All', 'Cash', 'Mobile Money'], font=(FONT_FAMILY, 10))
+            payment_filter_menu.pack(side='left', padx=(0, 10))
+
+            search_var = StringVar()
+            search_entry = ttk.Entry(controls_frame, textvariable=search_var, font=(FONT_FAMILY, 10), width=30)
+            search_entry.pack(side='left', padx=(0, 10))
+            search_entry.insert(0, "Search for an item...")
+
+            # --- Middle area: two-column layout (grouped on left, detailed on right) ---
+            middle_frame = Frame(main_frame, bg=BG_COLOR)
+            middle_frame.pack(fill='both', expand=True)
+
+            left_col = Frame(middle_frame, bg=BG_COLOR)
+            left_col.pack(side='left', fill='y', expand=False, padx=(0,10), pady=5)
+
+            right_col = Frame(middle_frame, bg=CARD_COLOR)
+            right_col.pack(side='right', fill='both', expand=True, pady=5)
+
+            # --- Grouped Sales Table (left column) ---
+            grouped_frame = Frame(left_col, bg=CARD_COLOR, padx=8, pady=8, relief='groove', borderwidth=1)
+            grouped_frame.pack(fill='y', expand=False)
+            Label(grouped_frame, text="Grouped Sales Summary", bg=CARD_COLOR, fg=TEXT_COLOR, font=(FONT_FAMILY, 16, 'bold')).pack(anchor='w', padx=6, pady=(6, 4))
+
+            style = ttk.Style()
+            style.configure("Modern.Treeview", font=(FONT_FAMILY, 10), rowheight=26, background=CARD_COLOR, fieldbackground=CARD_COLOR, foreground=TEXT_COLOR)
+            style.configure("Modern.Treeview.Heading", font=(FONT_FAMILY, 11, 'bold'), background=BLUE_COLOR, foreground='white', relief='flat')
+            style.map("Modern.Treeview.Heading", background=[('active', '#3a6ee8')])
+
+            grouped_cols = ("Product", "Quantity", "Total (ZMW)")
+            grouped_tree = ttk.Treeview(grouped_frame, columns=grouped_cols, show='headings', style="Modern.Treeview", height=12)
+            for col in grouped_cols:
+                grouped_tree.heading(col, text=col)
+                grouped_tree.column(col, anchor='w' if col == "Product" else 'e', width=140 if col == 'Product' else 80)
+            grouped_tree.pack(fill='y', expand=False, padx=6, pady=(0,6))
+
+            # --- Detailed Sales Table (right column) ---
+            detailed_frame = Frame(right_col, bg=CARD_COLOR, padx=8, pady=8, relief='groove', borderwidth=1)
+            detailed_frame.pack(fill='both', expand=True)
+            Label(detailed_frame, text="Detailed Sales Log", bg=CARD_COLOR, fg=TEXT_COLOR, font=(FONT_FAMILY, 16, 'bold')).pack(anchor='w', padx=6, pady=(6, 4))
+
+            detailed_cols = ("Product", "Quantity", "Total (ZMW)", "Payment Method", "Comment", "Date/Time")
+            detailed_tree = ttk.Treeview(detailed_frame, columns=detailed_cols, show='headings', style="Modern.Treeview")
+            
+            for col in detailed_cols:
+                detailed_tree.heading(col, text=col)
+                anchor = 'w'
+                if col in ["Quantity", "Total (ZMW)"]:
+                    anchor = 'e'
+                elif col == "Payment Method":
+                    anchor = 'center'
+                detailed_tree.column(col, anchor=anchor, width=140 if col=='Product' else 110)
+
+            detailed_tree.tag_configure('Cash', background=GREEN_COLOR, foreground='white')
+            detailed_tree.tag_configure('Mobile', background=BLUE_COLOR, foreground='white')
+            detailed_tree.tag_configure('oddrow', background='#f9f9f9')
+            detailed_tree.tag_configure('evenrow', background=CARD_COLOR)
+
+            detailed_tree.pack(fill='both', expand=True, padx=6, pady=(0,6))
+
+            # --- Data loading & helpers (unchanged logic) ---
+            def load_data():
+                # Clear tables
+                grouped_tree.delete(*grouped_tree.get_children())
+                detailed_tree.delete(*detailed_tree.get_children())
+
+                # Date range
+                s, e = compute_range()
+
+                conn = sqlite3.connect('bar_sales.db')
+                cur = conn.cursor()
+
+                # --- KPIs ---
+                cur.execute("SELECT SUM(total) FROM sales WHERE status != 'VOIDED' AND DATE(timestamp) BETWEEN ? AND ?", (s, e))
+                total_sales = cur.fetchone()[0] or 0.0
+                total_sales_label.config(text=f"ZMW {total_sales:.2f}")
+
+                cur.execute("SELECT SUM(si.quantity) FROM sale_items si JOIN sales s ON s.id = si.sale_id WHERE s.status != 'VOIDED' AND DATE(s.timestamp) BETWEEN ? AND ?", (s, e))
+                total_qty = cur.fetchone()[0] or 0
+                total_qty_label.config(text=str(total_qty))
+
+                stock_list = sales_utils.get_all_stock()
+                stock_remain = sum(item[1] for item in stock_list)
+                stock_remain_label.config(text=str(stock_remain))
+
+                # --- Grouped Sales ---
+                cur.execute("""
+                    SELECT si.item, SUM(si.quantity), SUM(si.subtotal)
+                    FROM sales s JOIN sale_items si ON s.id = si.sale_id
+                    WHERE s.status != 'VOIDED' AND DATE(s.timestamp) BETWEEN ? AND ?
+                    GROUP BY si.item ORDER BY SUM(si.quantity) DESC
+                """, (s, e))
+                for item, qty, sales_sum in cur.fetchall():
+                    grouped_tree.insert('', 'end', values=(item, int(qty), f"{sales_sum:.2f}"))
+
+                # --- Detailed Sales ---
+                query = """
+                    SELECT si.item, si.quantity, si.subtotal, s.payment_method, s.comment, s.timestamp
+                    FROM sales s JOIN sale_items si ON s.id = si.sale_id
+                    WHERE s.status != 'VOIDED' AND DATE(s.timestamp) BETWEEN ? AND ?
+                """
+                params = [s, e]
+
+                payment_filter = payment_filter_var.get()
+                if payment_filter != 'All':
+                    query += " AND s.payment_method = ?"
+                    params.append(payment_filter)
+
+                search_term = search_var.get()
+                if search_term and search_term != "Search for an item...":
+                    query += " AND si.item LIKE ?"
+                    params.append(f"%{search_term}%")
+
+                query += " ORDER BY s.timestamp DESC"
+                cur.execute(query, params)
+                
+                for i, row in enumerate(cur.fetchall()):
+                    tag = 'evenrow' if i % 2 == 0 else 'oddrow'
+                    payment_method = row[3]
+                    tags = [tag]
+                    if payment_method == 'Cash':
+                        tags.append('Cash')
+                    elif payment_method == 'Mobile Money':
+                        tags.append('Mobile')
+                    
+                    detailed_tree.insert('', 'end', values=row, tags=tags)
+
+                conn.close()
+
+            def compute_range():
+                today = date.today()
+                period = period_var.get()
+                if period == 'Today':
+                    s = e = today
+                elif period == 'Last 7 Days':
+                    s = today - timedelta(days=6)
+                    e = today
+                else: # Last 30 Days
+                    s = today - timedelta(days=29)
+                    e = today
+                return s.strftime('%Y-%m-%d'), e.strftime('%Y-%m-%d')
+
+            def on_search_focus_in(event):
+                if search_entry.get() == "Search for an item...":
+                    search_entry.delete(0, "end")
+                    search_entry.config(foreground="black")
+
+            def on_search_focus_out(event):
+                if not search_entry.get():
+                    search_entry.insert(0, "Search for an item...")
+                    search_entry.config(foreground="grey")
+
+            search_entry.bind("<FocusIn>", on_search_focus_in)
+            search_entry.bind("<FocusOut>", on_search_focus_out)
+            search_var.trace("w", lambda name, index, mode: load_data())
+            period_menu.bind('<<ComboboxSelected>>', lambda e: load_data())
+            payment_filter_menu.bind('<<ComboboxSelected>>', lambda e: load_data())
+
+            def toggle_dark_mode():
+                is_dark = dark_mode_var.get()
+                dark_mode_var.set(not is_dark)
+                if not is_dark:
+                    # Dark mode colors
+                    win.configure(bg='#1e293b')
+                    main_frame.configure(bg='#1e293b')
+                    header_frame.configure(bg='#1e293b')
+                    controls_frame.configure(bg='#1e293b')
+                    summary_frame.configure(bg='#1e293b')
+                    grouped_frame.configure(bg='#0f172a')
+                    detailed_frame.configure(bg='#0f172a')
+                    style.configure("Modern.Treeview", background='#0f172a', fieldbackground='#0f172a', foreground='#e2e8f0')
+                    dark_mode_btn.config(text="☀️ Light Mode")
+                else:
+                    # Light mode colors
+                    win.configure(bg=BG_COLOR)
+                    main_frame.configure(bg=BG_COLOR)
+                    header_frame.configure(bg=BG_COLOR)
+                    controls_frame.configure(bg=BG_COLOR)
+                    summary_frame.configure(bg=BG_COLOR)
+                    grouped_frame.configure(bg=CARD_COLOR)
+                    detailed_frame.configure(bg=CARD_COLOR)
+                    style.configure("Modern.Treeview", background=CARD_COLOR, fieldbackground=CARD_COLOR, foreground=TEXT_COLOR)
+                    dark_mode_btn.config(text="🌙 Dark Mode")
 
             load_data() # Initial load
 
@@ -1073,7 +1355,7 @@ def show_popup_receipt(root, current_user, sale_id, tx_id, total, payment_method
     receipt_window.after(30000, receipt_window.destroy)
 
 
-def create_cashier_interface(main_frame, root):
+def create_cashier_interface(main_frame, root, view_sales_modern_func=None):
     """Redesigned cashier interface with visual item buttons and streamlined workflow"""
     
     # Main container with split design
@@ -1451,7 +1733,19 @@ def create_cashier_interface(main_frame, root):
     add_hover_effect(payment_btn, '#27ae60', '#2ecc71')
     add_hover_effect(void_btn, '#c0392b', '#e74c3c')
     add_hover_effect(search_btn, '#3498db', '#2980b9')
-    
+
+    # Button to open sales view
+    def _open_sales_view_fallback():
+        messagebox.showinfo("View Sales", "Sales view is not available in this context.")
+
+    _view_sales_cmd = view_sales_modern_func if callable(view_sales_modern_func) else _open_sales_view_fallback
+
+    sales_view_btn = tk.Button(right_panel, text="📊 View Sales", command=_view_sales_cmd,
+                             bg='#9b59b6', fg='white', font=('Arial', 12, 'bold'),
+                             padx=20, pady=10)
+    sales_view_btn.pack(fill='x', padx=5, pady=(0, 10))
+    add_hover_effect(sales_view_btn, '#9b59b6', '#8e44ad')
+
     # ---------- DIALOGS ----------
     
     # Quantity dialog
@@ -1824,86 +2118,10 @@ def create_cashier_interface(main_frame, root):
     category_buttons[0].configure(bg='#ecf0f1', fg='#34495e')
     populate_items("All Items")
 
-# --- App Start ---
-# Replace the original startup code with a guarded main() and top-level error handler.
-
-def main():
-    # perform startup tasks and open the login window
-    # (keeps existing UI code for the login window below)
+if __name__ == '__main__':
     try:
-        if not os.path.exists('bar_sales.db'):
-            from tkinter import Tk
-            warn_root = Tk()
-            warn_root.withdraw()
-            messagebox.showwarning('Database Missing', 'Warning: bar_sales.db was missing! A new database will be created.')
-            sales_utils.log_audit_event('WARNING: bar_sales.db was missing on app start. New database created.')
-            warn_root.destroy()
-
-        sales_utils.init_db()
-        sales_utils.backup_today_sales()
-
-        # Seed default users in DB if missing (prevents reliance on hardcoded users)
-        try:
-            if not sales_utils.get_user('admin'):
-                sales_utils.create_user('admin', 'admin123', 'admin')
-            if not sales_utils.get_user('cashier'):
-                sales_utils.create_user('cashier', 'cashier123', 'cashier')
-        except Exception:
-            pass
-
-        import atexit
-        def on_app_close():
-            sales_utils.backup_today_sales()
-            sales_utils.log_audit_event('App closed and daily backup created.')
-        atexit.register(on_app_close)
-
-        # --- Create login window (same as before) ---
-        global login_window, entry_username, entry_password
-        login_window = tk.Tk()
-        login_window.title("Login - Bar Sales App")
-
-        # Login form
-        login_frame = tk.Frame(login_window)
-        login_frame.pack(padx=20, pady=20)
-
-        login_frame.grid_columnconfigure(1, weight=1)
-
-        login_frame_label = tk.Label(login_frame, text="Please login to continue", font=("Arial", 12, "bold"))
-        login_frame_label.grid(row=0, column=0, columnspan=2, pady=(0, 10))
-
-        label_username = tk.Label(login_frame, text="Username:")
-        label_username.grid(row=1, column=0, sticky="e")
-        entry_username = tk.Entry(login_frame)
-        entry_username.grid(row=1, column=1)
-
-        label_password = tk.Label(login_frame, text="Password:")
-        label_password.grid(row=2, column=0, sticky="e")
-        entry_password = tk.Entry(login_frame, show="*")
-        entry_password.grid(row=2, column=1)
-
-        login_btn = tk.Button(login_frame, text="Login", command=login)
-        login_btn.grid(row=3, column=0, columnspan=2, pady=10)
-
-        # Bind Enter to login on bottom UI
-        entry_password.bind('<Return>', lambda e: login())
-
-        # Start the GUI loop
-        login_window.mainloop()
-
-    except Exception as exc:
-        # Print traceback to console and show a messagebox so you can see the error
+        restart_login()
+    except Exception as e:
+        print('Error starting application:', e)
         import traceback
-        trace = traceback.format_exc()
-        print(trace)
-        # Use a temporary root for messagebox if no Tk root exists
-        try:
-            tmp = tk.Tk()
-            tmp.withdraw()
-            messagebox.showerror("Startup Error", f"Application failed to start:\n{str(exc)}\n\nSee console for details.")
-            tmp.destroy()
-        except Exception:
-            # If even messagebox fails, just print
-            print("Additionally failed to show messagebox.")
-
-if __name__ == "__main__":
-    main()
+        traceback.print_exc()
