@@ -239,295 +239,218 @@ def show_main_app():
 
     elif current_user['role'] == 'admin':
         # Admin: View sales log, dashboard, export, user management
-        def view_sales():
-            """Admin sales dashboard: headers with reference/comment + item summary."""
-            import sqlite3, csv, os
-            from tkinter import Toplevel, Frame, StringVar, Entry, Button, END
-            from tkinter import ttk
-            import sales_utils
+        def view_sales_modern():
+            """Modern 'View Sales' window with grouped sales and summary cards."""
+            import sqlite3
+            from tkinter import Toplevel, Frame, StringVar, Button, Label, ttk
+            from datetime import date, timedelta
+
+            # --- UI Configuration ---
+            BG_COLOR = '#f4f7ff'
+            CARD_COLOR = '#ffffff'
+            TEXT_COLOR = '#333333'
+            GREEN_COLOR = '#3DDC97'
+            BLUE_COLOR = '#4C7EFF'
+            FONT_FAMILY = "Poppins"
 
             win = Toplevel(root)
-            win.title("VIEW SALES – ADMIN DASHBOARD")
+            win.title("View Sales")
+            win.configure(bg=BG_COLOR)
             try:
                 win.state('zoomed')
             except Exception:
-                win.geometry("1200x700")
-            # Dark mode background
-            try:
-                win.configure(bg='#0b1220')
-            except Exception:
-                pass
+                win.geometry("1400x850")
 
-            # ttk dark styling for widgets in this window
-            try:
-                style = ttk.Style(win)
-                style.configure('Treeview', background='#111827', fieldbackground='#111827', foreground='#e6eef6', bordercolor='#1f2937', rowheight=26)
-                style.map('Treeview', background=[('selected', '#2563eb')], foreground=[('selected', '#ffffff')])
-                style.configure('Treeview.Heading', background='#0b1220', foreground='#93c5fd', font=('Segoe UI', 10, 'bold'))
-                style.configure('TScrollbar', background='#0b1220', troughcolor='#0b1220', bordercolor='#0b1220')
-            except Exception:
-                pass
+            # --- Main Layout ---
+            main_frame = Frame(win, bg=BG_COLOR, padx=20, pady=20)
+            main_frame.pack(fill='both', expand=True)
 
-            # Top controls (search + actions)
-            top = Frame(win, bg='#0b1220')
-            top.pack(fill="x", padx=10, pady=8)
+            # --- Header ---
+            header_frame = Frame(main_frame, bg=BG_COLOR)
+            header_frame.pack(fill='x', pady=(0, 20))
+            
+            Label(header_frame, text="Sales Overview", bg=BG_COLOR, fg=TEXT_COLOR, font=(FONT_FAMILY, 24, 'bold')).pack(side='left')
+            
+            refresh_btn = Button(header_frame, text="🔄 Refresh Sales", command=lambda: load_data(), relief='flat', bg=BLUE_COLOR, fg='white', font=(FONT_FAMILY, 10, 'bold'), padx=10, pady=5)
+            refresh_btn.pack(side='right')
+
+            # --- Summary Cards ---
+            summary_frame = Frame(main_frame, bg=BG_COLOR)
+            summary_frame.pack(fill='x', pady=(0, 20))
+
+            def create_summary_card(parent, title, value_bg):
+                card = Frame(parent, bg=CARD_COLOR, relief='flat', borderwidth=0)
+                card.pack(side='left', expand=True, fill='x', padx=10)
+                
+                # Add a shadow effect
+                shadow = Frame(card, bg='#e0e0e0', height=2)
+                shadow.pack(side='bottom', fill='x')
+
+                Label(card, text=title, bg=CARD_COLOR, fg='#666', font=(FONT_FAMILY, 12)).pack(pady=(10, 0))
+                value_label = Label(card, text="ZMW 0.00", bg=CARD_COLOR, fg=value_bg, font=(FONT_FAMILY, 20, 'bold'))
+                value_label.pack(pady=(0, 10))
+                return value_label
+
+            total_sales_label = create_summary_card(summary_frame, "💰 Total Daily Sales", GREEN_COLOR)
+            total_qty_label = create_summary_card(summary_frame, "🧾 Total Quantity Sold", BLUE_COLOR)
+            stock_remain_label = create_summary_card(summary_frame, "📦 Available Stock Remaining", '#f39c12')
+
+            # --- Controls ---
+            controls_frame = Frame(main_frame, bg=BG_COLOR)
+            controls_frame.pack(fill='x', pady=(0, 10))
+
+            period_var = StringVar(value='Today')
+            period_menu = ttk.Combobox(controls_frame, textvariable=period_var, state='readonly', values=['Today', 'Last 7 Days', 'Last 30 Days'], font=(FONT_FAMILY, 10))
+            period_menu.pack(side='left', padx=(0, 10))
+
+            payment_filter_var = StringVar(value='All')
+            payment_filter_menu = ttk.Combobox(controls_frame, textvariable=payment_filter_var, state='readonly', values=['All', 'Cash', 'Mobile Money'], font=(FONT_FAMILY, 10))
+            payment_filter_menu.pack(side='left', padx=(0, 10))
 
             search_var = StringVar()
-            Entry(top, textvariable=search_var, width=28, bg='#111827', fg='#e6eef6', insertbackground='#e6eef6', relief='flat').pack(side="left", padx=(0, 6))
-            # Header filters
-            header_ref_var = StringVar()
-            Entry(top, textvariable=header_ref_var, width=22, bg='#111827', fg='#e6eef6', insertbackground='#e6eef6', relief='flat').pack(side="left", padx=(0,6))
-            method_var = StringVar(value="All")
-            method_menu = ttk.Combobox(top, textvariable=method_var, values=["All","Cash","Mobile Money","Card"], width=14, state='readonly')
-            method_menu.pack(side='left', padx=(0,6))
-            # Date range (optional)
-            try:
-                from tkcalendar import DateEntry as _DE
-                start_date = _DE(top, date_pattern='yyyy-mm-dd', width=12)
-                end_date = _DE(top, date_pattern='yyyy-mm-dd', width=12)
-                start_date.pack(side='left', padx=(0,4))
-                end_date.pack(side='left', padx=(0,6))
-            except Exception:
-                start_date = None
-                end_date = None
+            search_entry = ttk.Entry(controls_frame, textvariable=search_var, font=(FONT_FAMILY, 10), width=30)
+            search_entry.pack(side='left', padx=(0, 10))
+            search_entry.insert(0, "Search for an item...")
 
-            def do_export():
-                rows = [tree.item(i, "values") for i in tree.get_children()]
-                if not os.path.exists("exports"):
-                    os.makedirs("exports")
-                path = os.path.join("exports", "sales_item_summary.csv")
-                with open(path, "w", newline="", encoding="utf-8") as f:
-                    w = csv.writer(f)
-                    w.writerow(["Item", "Total Qty", "Total Sales", "Orders"])
-                    w.writerows(rows)
-                messagebox.showinfo("Export", f"Exported to:\n{path}")
+            # --- Grouped Sales Table ---
+            grouped_frame = Frame(main_frame, bg=CARD_COLOR)
+            grouped_frame.pack(fill='x', pady=(10, 10))
+            Label(grouped_frame, text="Grouped Sales Summary", bg=CARD_COLOR, fg=TEXT_COLOR, font=(FONT_FAMILY, 16, 'bold')).pack(anchor='w', padx=10, pady=(10, 5))
 
-            Button(top, text="Search", command=lambda: apply_filter(), bg='#2563eb', fg='white', relief='flat').pack(side="left", padx=3)
-            Button(top, text="Refresh", command=lambda: load_data(), bg='#0ea5e9', fg='white', relief='flat').pack(side="left", padx=3)
-            Button(top, text="Export CSV", command=do_export, bg='#22c55e', fg='white', relief='flat').pack(side="left", padx=3)
-            Button(top, text="Clear All Stock", command=clear_all_stock, bg='#c0392b', fg='white', relief='flat', font=('Arial', 9, 'bold')).pack(side="left", padx=3)
-            Button(top, text="Close", command=win.destroy, bg='#ef4444', fg='white', relief='flat').pack(side="right")
+            style = ttk.Style()
+            style.configure("Modern.Treeview", font=(FONT_FAMILY, 10), rowheight=28, background=CARD_COLOR, fieldbackground=CARD_COLOR, foreground=TEXT_COLOR)
+            style.configure("Modern.Treeview.Heading", font=(FONT_FAMILY, 11, 'bold'), background=BLUE_COLOR, foreground='white', relief='flat')
+            style.map("Modern.Treeview.Heading", background=[('active', '#3a6ee8')])
 
-            # Metrics (daily sales, available stock, most sold item)
-            metrics = Frame(win, bg='#0b1220')
-            metrics.pack(fill='x', padx=10, pady=(0,8))
+            grouped_cols = ("Product", "Quantity", "Total (ZMW)")
+            grouped_tree = ttk.Treeview(grouped_frame, columns=grouped_cols, show='headings', style="Modern.Treeview", height=5)
+            for col in grouped_cols:
+                grouped_tree.heading(col, text=col)
+                grouped_tree.column(col, anchor='w' if col == "Product" else 'e')
+            grouped_tree.pack(fill='x', padx=10, pady=(0, 10))
 
-            def _card(parent, title, color):
-                card = Frame(parent, bg='#111827', highlightbackground='#1f2937', highlightthickness=1)
-                card.pack(side='left', padx=8, pady=2, fill='x', expand=True)
-                tk.Label(card, text=title, bg='#111827', fg=color, font=('Segoe UI', 11, 'bold')).pack(anchor='w', padx=12, pady=(10,0))
-                val = tk.Label(card, text='—', bg='#111827', fg='#e6eef6', font=('Segoe UI', 20, 'bold'))
-                val.pack(anchor='w', padx=12, pady=(2,10))
-                return val
+            # --- Detailed Sales Table ---
+            detailed_frame = Frame(main_frame, bg=CARD_COLOR)
+            detailed_frame.pack(fill='both', expand=True)
+            Label(detailed_frame, text="Detailed Sales Log", bg=CARD_COLOR, fg=TEXT_COLOR, font=(FONT_FAMILY, 16, 'bold')).pack(anchor='w', padx=10, pady=(10, 5))
 
-            daily_val_lbl = _card(metrics, 'Daily Sales (ZMW)', '#06b6d4')
-            stock_val_lbl = _card(metrics, 'Available Stock', '#a78bfa')
-            topitem_val_lbl = _card(metrics, 'Most Sold Item', '#f59e0b')
+            detailed_cols = ("Product", "Quantity", "Total (ZMW)", "Payment Method", "Comment", "Date/Time")
+            detailed_tree = ttk.Treeview(detailed_frame, columns=detailed_cols, show='headings', style="Modern.Treeview")
+            
+            for col in detailed_cols:
+                detailed_tree.heading(col, text=col)
+                anchor = 'w'
+                if col in ["Quantity", "Total (ZMW)"]:
+                    anchor = 'e'
+                elif col == "Payment Method":
+                    anchor = 'center'
+                detailed_tree.column(col, anchor=anchor, width=120)
 
-            # Sales headers with ref/comment
-            headers_frame = Frame(win, bg='#0b1220')
-            headers_frame.pack(fill='both', expand=True, padx=10, pady=(0,8))
-            header_cols = ("ID","TxID","Cashier","Total","Time","Status","Method","Ref No","Comment")
-            headers_tree = ttk.Treeview(headers_frame, columns=header_cols, show='headings', height=12)
-            for c in header_cols:
-                headers_tree.heading(c, text=c)
-                headers_tree.column(c, width=120, anchor='w' if c in ("TxID","Comment") else 'e')
-            hscroll = ttk.Scrollbar(headers_frame, orient="vertical", command=headers_tree.yview)
-            headers_tree.configure(yscrollcommand=hscroll.set)
-            headers_tree.pack(side='left', fill='both', expand=True)
-            hscroll.pack(side='right', fill='y')
+            detailed_tree.tag_configure('Cash', background=GREEN_COLOR, foreground='white')
+            detailed_tree.tag_configure('Mobile', background=BLUE_COLOR, foreground='white')
+            detailed_tree.tag_configure('oddrow', background='#f9f9f9')
+            detailed_tree.tag_configure('evenrow', background=CARD_COLOR)
 
-            # Summary panel
-            summary = Frame(win, bg='#0b1220')
-            summary.pack(fill='x', padx=10, pady=(0,8))
-            total_label = tk.Label(summary, text="Total Sales: ZMW 0.00   Transactions: 0   Top Item: -", font=('Segoe UI', 11, 'bold'), bg='#0b1220', fg='#e6eef6')
-            total_label.pack(anchor='w')
-
-            # Item aggregation treeview (daily rollup)
-            cols = ("Date", "Item", "Qty", "Sales")
-            tree = ttk.Treeview(win, columns=cols, show="headings", height=12)
-            for c in cols:
-                tree.heading(c, text=c)
-            tree.column("Date", width=110, anchor="w")
-            tree.column("Item", width=300, anchor="w")
-            tree.column("Qty", width=80, anchor="e")
-            tree.column("Sales", width=100, anchor="e")
-            yscroll = ttk.Scrollbar(win, orient="vertical", command=tree.yview)
-            tree.configure(yscrollcommand=yscroll.set)
-            tree.pack(side="left", fill="both", expand=True, padx=(10,0), pady=(0,10))
-            yscroll.pack(side="right", fill="y", padx=(0,10), pady=(0,10))
-
-            # Top 5 most sold items list (within date range)
-            top5_frame = Frame(win, bg='#0b1220')
-            top5_frame.pack(fill='x', padx=10, pady=(0,8))
-            top5_title = tk.Label(top5_frame, text="Top 5 Most Sold Items", bg='#0b1220', fg='#93c5fd', font=('Segoe UI', 12, 'bold'))
-            top5_title.pack(anchor='w')
-            top5_list = tk.Listbox(top5_frame, height=5, bg='#111827', fg='#e6eef6', highlightthickness=0, relief='flat')
-            top5_list.pack(fill='x', padx=(0,0), pady=(6,0))
-
-            all_rows = []
+            detailed_tree.pack(fill='both', expand=True, padx=10, pady=(0, 10))
 
             def load_data():
-                nonlocal all_rows
-                tree.delete(*tree.get_children())
-                # Aggregate per item per day across non-voided sales
-                conn = sqlite3.connect(sales_utils.DB_NAME)
+                # Clear tables
+                grouped_tree.delete(*grouped_tree.get_children())
+                detailed_tree.delete(*detailed_tree.get_children())
+
+                # Date range
+                s, e = compute_range()
+
+                conn = sqlite3.connect('bar_sales.db')
                 cur = conn.cursor()
-                # Headers
-                headers_tree.delete(*headers_tree.get_children())
+
+                # --- KPIs ---
+                cur.execute("SELECT SUM(total) FROM sales WHERE status != 'VOIDED' AND DATE(timestamp) BETWEEN ? AND ?", (s, e))
+                total_sales = cur.fetchone()[0] or 0.0
+                total_sales_label.config(text=f"ZMW {total_sales:.2f}")
+
+                cur.execute("SELECT SUM(si.quantity) FROM sale_items si JOIN sales s ON s.id = si.sale_id WHERE s.status != 'VOIDED' AND DATE(s.timestamp) BETWEEN ? AND ?", (s, e))
+                total_qty = cur.fetchone()[0] or 0
+                total_qty_label.config(text=str(total_qty))
+
+                stock_list = sales_utils.get_all_stock()
+                stock_remain = sum(item[1] for item in stock_list)
+                stock_remain_label.config(text=str(stock_remain))
+
+                # --- Grouped Sales ---
                 cur.execute("""
-                    SELECT id, transaction_id, cashier, total, timestamp, status, 
-                           COALESCE(payment_method,''), COALESCE(reference_no,''), COALESCE(comment,'')
-                    FROM sales
-                    ORDER BY timestamp DESC
-                    LIMIT 200
-                """)
-                header_rows = cur.fetchall()
-                # Apply filters
-                ref_filter = (header_ref_var.get() or '').strip().lower()
-                method_filter = method_var.get()
-                def in_date_range(ts: str) -> bool:
-                    if start_date and end_date:
-                        try:
-                            s = start_date.get_date().strftime('%Y-%m-%d')
-                            e = end_date.get_date().strftime('%Y-%m-%d')
-                            d = ts[:10]
-                            return (s <= d <= e)
-                        except Exception:
-                            return True
-                    return True
-                filtered_headers = []
-                for r in header_rows:
-                    _id, _tx, _cashier, _tot, _ts, _st, _pm, _ref, _cmt = r
-                    if ref_filter and ref_filter not in (_ref or '').lower():
-                        continue
-                    if method_filter != 'All' and (_pm or '') != method_filter:
-                        continue
-                    if not in_date_range(_ts or ''):
-                        continue
-                    filtered_headers.append(r)
-                # Striped rows (dark)
-                headers_tree.tag_configure('odd', background='#0f172a')
-                headers_tree.tag_configure('even', background='#111827')
-                for i, r in enumerate(filtered_headers):
-                    headers_tree.insert("", END, values=r, tags=('even' if i % 2 == 0 else 'odd',))
-                # Determine date bounds
-                date_filter_clause = ""
-                params = []
-                if start_date and end_date:
-                    try:
-                        s = start_date.get_date().strftime('%Y-%m-%d')
-                        e = end_date.get_date().strftime('%Y-%m-%d')
-                        date_filter_clause = " AND DATE(s.timestamp) BETWEEN ? AND ? "
-                        params = [s, e]
-                    except Exception:
-                        pass
+                    SELECT si.item, SUM(si.quantity), SUM(si.subtotal)
+                    FROM sales s JOIN sale_items si ON s.id = si.sale_id
+                    WHERE s.status != 'VOIDED' AND DATE(s.timestamp) BETWEEN ? AND ?
+                    GROUP BY si.item ORDER BY SUM(si.quantity) DESC
+                """, (s, e))
+                for item, qty, sales_sum in cur.fetchall():
+                    grouped_tree.insert('', 'end', values=(item, int(qty), f"{sales_sum:.2f}"))
 
-                # Daily rollup query (each product appears once per day)
-                cur.execute(
-                    f"""
-                    SELECT DATE(s.timestamp) as d,
-                           si.item,
-                           SUM(si.quantity) AS total_qty,
-                           SUM(si.subtotal) AS total_sales
-                    FROM sales s
-                    JOIN sale_items si ON s.id = si.sale_id
-                    WHERE s.status != 'VOIDED' {date_filter_clause}
-                    GROUP BY d, si.item
-                    ORDER BY d DESC, total_qty DESC
-                    """,
-                    params
-                )
-                rows = cur.fetchall()
+                # --- Detailed Sales ---
+                query = """
+                    SELECT si.item, si.quantity, si.subtotal, s.payment_method, s.comment, s.timestamp
+                    FROM sales s JOIN sale_items si ON s.id = si.sale_id
+                    WHERE s.status != 'VOIDED' AND DATE(s.timestamp) BETWEEN ? AND ?
+                """
+                params = [s, e]
+
+                payment_filter = payment_filter_var.get()
+                if payment_filter != 'All':
+                    query += " AND s.payment_method = ?"
+                    params.append(payment_filter)
+
+                search_term = search_var.get()
+                if search_term and search_term != "Search for an item...":
+                    query += " AND si.item LIKE ?"
+                    params.append(f"%{search_term}%")
+
+                query += " ORDER BY s.timestamp DESC"
+                cur.execute(query, params)
+                
+                for i, row in enumerate(cur.fetchall()):
+                    tag = 'evenrow' if i % 2 == 0 else 'oddrow'
+                    payment_method = row[3]
+                    tags = [tag]
+                    if payment_method == 'Cash':
+                        tags.append('Cash')
+                    elif payment_method == 'Mobile Money':
+                        tags.append('Mobile')
+                    
+                    detailed_tree.insert('', 'end', values=row, tags=tags)
+
                 conn.close()
-                all_rows = rows
-                tree.tag_configure('odd', background='#0f172a', foreground='#e6eef6')
-                tree.tag_configure('even', background='#111827', foreground='#e6eef6')
-                for i, (d, item, qty, sales) in enumerate(rows):
-                    tree.insert("", END, values=(d, item, int(qty or 0), f"{float(sales or 0):.2f}"), tags=('even' if i % 2 == 0 else 'odd',))
-                # Summary
-                if rows:
-                    total_sales = sum(float(r[3] or 0) for r in rows)
-                    total_tx = len(set([h[0] for h in filtered_headers])) if filtered_headers else 0
-                    top_item = rows[0][1]
-                    total_label.config(text=f"Total Sales: ZMW {total_sales:.2f}   Transactions: {total_tx}   Top Item: {top_item}")
 
-                # Top 5 most sold items within range
-                try:
-                    top5_list.delete(0, END)
-                    # Reopen for top 5 query
-                    conn2 = sqlite3.connect(sales_utils.DB_NAME)
-                    cur2 = conn2.cursor()
-                    cur2.execute(
-                        f"""
-                        SELECT si.item, SUM(si.quantity) AS qty
-                        FROM sales s
-                        JOIN sale_items si ON s.id = si.sale_id
-                        WHERE s.status != 'VOIDED' {date_filter_clause}
-                        GROUP BY si.item
-                        ORDER BY qty DESC
-                        LIMIT 5
-                        """,
-                        params
-                    )
-                    top5 = cur2.fetchall()
-                    conn2.close()
-                    for it, q in top5:
-                        top5_list.insert(END, f"{it} — {int(q or 0)}")
-                except Exception:
-                    pass
+            def compute_range():
+                today = date.today()
+                period = period_var.get()
+                if period == 'Today':
+                    s = e = today
+                elif period == 'Last 7 Days':
+                    s = today - timedelta(days=6)
+                    e = today
+                else: # Last 30 Days
+                    s = today - timedelta(days=29)
+                    e = today
+                return s.strftime('%Y-%m-%d'), e.strftime('%Y-%m-%d')
 
-                # Metrics update
-                try:
-                    ds = sales_utils.get_daily_summary()
-                    daily_val_lbl.config(text=f"{float(ds.get('total_sales', 0.0)):.2f}")
-                    top_list = ds.get('top_items') or []
-                    top_name = top_list[0][0] if top_list else '—'
-                    topitem_val_lbl.config(text=str(top_name))
-                except Exception:
-                    daily_val_lbl.config(text='0.00')
-                    topitem_val_lbl.config(text='—')
+            def on_search_focus_in(event):
+                if search_entry.get() == "Search for an item...":
+                    search_entry.delete(0, "end")
+                    search_entry.config(foreground="black")
 
-                try:
-                    stock_rows = sales_utils.get_all_stock()
-                    total_stock = sum(int(r[1] or 0) for r in stock_rows)
-                    stock_val_lbl.config(text=str(total_stock))
-                except Exception:
-                    stock_val_lbl.config(text='0')
+            def on_search_focus_out(event):
+                if not search_entry.get():
+                    search_entry.insert(0, "Search for an item...")
+                    search_entry.config(foreground="grey")
 
-            def apply_filter():
-                q = (search_var.get() or "").strip().lower()
-                tree.delete(*tree.get_children())
-                for item, qty, sales, orders in all_rows:
-                    if q and q not in item.lower():
-                        continue
-                    tree.insert("", END, values=(item, int(qty or 0), f"{float(sales or 0):.2f}", int(orders or 0)))
+            search_entry.bind("<FocusIn>", on_search_focus_in)
+            search_entry.bind("<FocusOut>", on_search_focus_out)
+            search_var.trace("w", lambda name, index, mode: load_data())
+            period_menu.bind('<<ComboboxSelected>>', lambda e: load_data())
+            payment_filter_menu.bind('<<ComboboxSelected>>', lambda e: load_data())
 
-            # Enable column sorting
-            def sort_by(col, numeric=False):
-                data = [(tree.set(k, col), k) for k in tree.get_children("")]
-                if numeric:
-                    def to_num(v):
-                        try:
-                            return float(str(v).replace(",", ""))
-                        except:
-                            return 0.0
-                    data.sort(key=lambda x: to_num(x[0]))
-                else:
-                    data.sort(key=lambda x: x[0].lower())
-                # toggle direction
-                if getattr(sort_by, "rev_"+col, False):
-                    data.reverse()
-                setattr(sort_by, "rev_"+col, not getattr(sort_by, "rev_"+col, False))
-                for idx, (_, k) in enumerate(data):
-                    tree.move(k, "", idx)
-
-            tree.heading("Date", text="Date", command=lambda: sort_by("Date", numeric=False))
-            tree.heading("Item", text="Item", command=lambda: sort_by("Item", numeric=False))
-            tree.heading("Qty", text="Qty", command=lambda: sort_by("Qty", numeric=True))
-            tree.heading("Sales", text="Sales", command=lambda: sort_by("Sales", numeric=True))
-
-            load_data()
+            load_data() # Initial load
 
         def user_management():
             import sqlite3
@@ -803,177 +726,114 @@ def show_main_app():
                 win.destroy()
             Button(win, text="Export", command=do_export).grid(row=4+len(columns), column=0, columnspan=3, pady=10)
 
-        def manage_stock():
-            """Unified stock management: Receive stock, Add/Edit items, Delete items."""
+        def add_stock():
             import sqlite3
-            from tkinter import Toplevel, Label, Entry, Button, messagebox, Listbox, END, StringVar, Frame
-            import sales_utils
-            
+            from tkinter import Toplevel, Label, Entry, Button, messagebox, Listbox, END, StringVar
             win = Toplevel(root)
-            win.title("Stock Management - Receive/Add/Edit/Delete")
-            win.geometry("700x550")
-            
-            # Main frame
-            main_frm = Frame(win)
-            main_frm.pack(fill='both', expand=True, padx=10, pady=10)
-            
-            # Left side: Input form
-            left_frm = Frame(main_frm)
-            left_frm.pack(side='left', fill='both', expand=True, padx=(0, 10))
-            
-            Label(left_frm, text="Item Name:", font=('Arial', 10, 'bold')).grid(row=0, column=0, sticky='w', pady=5)
-            entry_item = Entry(left_frm, width=25, font=('Arial', 10))
-            entry_item.grid(row=0, column=1, pady=5, padx=5)
-            
-            Label(left_frm, text="Quantity to Add:", font=('Arial', 10, 'bold')).grid(row=1, column=0, sticky='w', pady=5)
-            entry_qty = Entry(left_frm, width=25, font=('Arial', 10))
-            entry_qty.grid(row=1, column=1, pady=5, padx=5)
-            
-            Label(left_frm, text="Cost Price (optional):", font=('Arial', 10)).grid(row=2, column=0, sticky='w', pady=5)
-            entry_cost = Entry(left_frm, width=25, font=('Arial', 10))
-            entry_cost.grid(row=2, column=1, pady=5, padx=5)
-            
-            Label(left_frm, text="Selling Price (optional):", font=('Arial', 10)).grid(row=3, column=0, sticky='w', pady=5)
-            entry_sell = Entry(left_frm, width=25, font=('Arial', 10))
-            entry_sell.grid(row=3, column=1, pady=5, padx=5)
-            
-            Label(left_frm, text="Category (optional):", font=('Arial', 10)).grid(row=4, column=0, sticky='w', pady=5)
+            win.title("Add/Restock/Edit/Delete Item")
+            Label(win, text="Item Name:").grid(row=0, column=0)
+            entry_item = Entry(win)
+            entry_item.grid(row=0, column=1)
+            Label(win, text="Quantity to Add:").grid(row=1, column=0)
+            entry_qty = Entry(win)
+            entry_qty.grid(row=1, column=1)
+            Label(win, text="Cost Price (optional):").grid(row=2, column=0)
+            entry_cost = Entry(win)
+            entry_cost.grid(row=2, column=1)
+            Label(win, text="Selling Price (optional):").grid(row=3, column=0)
+            entry_sell = Entry(win)
+            entry_sell.grid(row=3, column=1)
+            Label(win, text="Category:").grid(row=4, column=0)
+            from sales_utils import set_item_category, get_item_category
             category_var = StringVar(win)
-            entry_cat = Entry(left_frm, textvariable=category_var, width=25, font=('Arial', 10))
-            entry_cat.grid(row=4, column=1, pady=5, padx=5)
-            
-            # Right side: Item list
-            right_frm = Frame(main_frm)
-            right_frm.pack(side='right', fill='both', expand=True)
-            
-            Label(right_frm, text="Existing Items:", font=('Arial', 10, 'bold')).pack(anchor='w')
-            item_list = Listbox(right_frm, width=30, height=15, font=('Arial', 9))
-            item_list.pack(fill='both', expand=True, pady=(5, 0))
-            
-            # Refresh item list
-            def refresh_list():
-                item_list.delete(0, END)
-                for item, qty, cat in sales_utils.get_all_stock():
-                    item_list.insert(END, f"{item} ({qty}) [{cat or 'No Category'}]")
-            
-            refresh_list()
-            
-            # Item selection handler
+            category_var.set("")
+            entry_cat = Entry(win, textvariable=category_var)
+            entry_cat.grid(row=4, column=1)
+            # Listbox for existing items
+            Label(win, text="Existing Items:").grid(row=0, column=2, padx=(20,0))
+            item_list = Listbox(win, width=25, height=8)
+            item_list.grid(row=1, column=2, rowspan=5, padx=(20,0))
+            from sales_utils import get_all_stock, delete_item, get_item_prices
+            for item, qty, cat in get_all_stock():
+                item_list.insert(END, f"{item} ({qty}) [{cat}]")
             def on_select(event):
                 sel = item_list.curselection()
                 if sel:
                     name = item_list.get(sel[0]).split(' (')[0]
                     entry_item.delete(0, END)
                     entry_item.insert(0, name)
-                    # Fill prices and category
-                    prices = sales_utils.get_item_prices(name)
+                    # Optionally fill in prices and category
+                    prices = get_item_prices(name)
                     if prices:
                         entry_cost.delete(0, END)
-                        entry_cost.insert(0, str(prices[0]) if prices[0] else '')
+                        entry_cost.insert(0, str(prices[0]))
                         entry_sell.delete(0, END)
-                        entry_sell.insert(0, str(prices[1]) if prices[1] else '')
-                    cat = sales_utils.get_item_category(name)
-                    category_var.set(cat if cat else '')
-            
+                        entry_sell.insert(0, str(prices[1]))
+                    cat = get_item_category(name)
+                    category_var.set(cat)
             item_list.bind('<<ListboxSelect>>', on_select)
-            
-            # Action buttons frame
-            btn_frm = Frame(win)
-            btn_frm.pack(fill='x', padx=10, pady=10)
-            
-            def do_save():
-                """Save/Receive stock - adds quantity to existing stock."""
+            def do_add():
                 item = entry_item.get().strip()
-                if not item:
-                    messagebox.showerror("Error", "Enter item name.")
-                    return
                 try:
                     qty = int(entry_qty.get())
-                    if qty <= 0:
-                        messagebox.showerror("Error", "Quantity must be positive.")
-                        return
+                    if qty < 0:
+                        raise ValueError
                 except Exception:
-                    messagebox.showerror("Error", "Enter a valid quantity (whole number).")
+                    messagebox.showerror("Error", "Enter a valid (zero or positive) quantity.")
                     return
-                
-                cost = entry_cost.get().strip()
-                sell = entry_sell.get().strip()
-                cost_f = float(cost) if cost else None
-                sell_f = float(sell) if sell else None
-                cat = category_var.get().strip()
-                
                 try:
-                    # Add quantity (additive)
-                    sales_utils.update_stock(item, qty)
-                    # Update prices if provided
-                    if cost_f is not None or sell_f is not None:
-                        sales_utils.set_item_prices(item, cost_f, sell_f)
-                    # Update category if provided
-                    if cat:
-                        sales_utils.set_item_category(item, cat)
-                    messagebox.showinfo("Success", f"Added {qty} units to '{item}'.\nStock updated successfully!")
-                    # Clear form and refresh list
-                    entry_item.delete(0, END)
-                    entry_qty.delete(0, END)
-                    entry_cost.delete(0, END)
-                    entry_sell.delete(0, END)
-                    category_var.set('')
-                    refresh_list()
-                except Exception as e:
-                    messagebox.showerror("Error", f"Failed to update stock: {e}")
-            
+                    cost = float(entry_cost.get()) if entry_cost.get().strip() else None
+                except Exception:
+                    messagebox.showerror("Error", "Invalid cost price.")
+                    return
+                try:
+                    sell = float(entry_sell.get()) if entry_sell.get().strip() else None
+                except Exception:
+                    messagebox.showerror("Error", "Invalid selling price.")
+                    return
+                cat = category_var.get().strip()
+                from sales_utils import update_stock, set_item_prices
+                update_stock(item, qty)
+                if cost is not None or sell is not None:
+                    set_item_prices(item, cost, sell)
+                if cat:
+                    set_item_category(item, cat)
+                messagebox.showinfo("Success", f"Updated '{item}' (added {qty}).")
+                win.destroy()
             def do_delete():
-                """Delete selected item."""
                 item = entry_item.get().strip()
                 if not item:
                     messagebox.showerror("Error", "Enter/select an item to delete.")
                     return
-                if messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete '{item}' from inventory?\n\nThis action cannot be undone."):
-                    try:
-                        sales_utils.delete_item(item)
-                        messagebox.showinfo("Deleted", f"'{item}' deleted from inventory.")
-                        entry_item.delete(0, END)
-                        entry_qty.delete(0, END)
-                        entry_cost.delete(0, END)
-                        entry_sell.delete(0, END)
-                        category_var.set('')
-                        refresh_list()
-                    except Exception as e:
-                        messagebox.showerror("Error", f"Failed to delete item: {e}")
-            
-            def show_sales_history():
-                """Show sales history for selected item."""
+                if messagebox.askyesno("Delete Item", f"Are you sure you want to delete '{item}' from inventory?"):
+                    delete_item(item)
+                    messagebox.showinfo("Deleted", f"'{item}' deleted from inventory.")
+                    win.destroy()
+            Button(win, text="Save", command=do_add).grid(row=6, column=0, columnspan=2, pady=10)
+            Button(win, text="Delete Item", command=do_delete).grid(row=6, column=2, pady=10)
+            # Sales history for selected item
+            def show_item_sales():
                 sel = item_list.curselection()
                 if not sel:
                     messagebox.showerror("Error", "Select an item to view sales history.")
                     return
                 name = item_list.get(sel[0]).split(' (')[0]
                 from sales_utils import get_sales_history_for_item
-                from tkinter import Text, Scrollbar, RIGHT, Y
                 sales = get_sales_history_for_item(name)
+                from tkinter import Toplevel, Text, Scrollbar, RIGHT, Y, END
                 win_hist = Toplevel(win)
-                win_hist.title(f"Sales History: {name}")
-                txt = Text(win_hist, width=80, height=20, font=('Consolas', 9))
+                win_hist.title(f"Sales History for {name}")
+                txt = Text(win_hist, width=80, height=20)
                 txt.pack(side="left", fill="both", expand=True)
                 scrollbar = Scrollbar(win_hist, command=txt.yview)
                 scrollbar.pack(side=RIGHT, fill=Y)
                 txt.config(yscrollcommand=scrollbar.set)
-                txt.insert(END, f"{'Date':<20} {'Cashier':<15} {'Qty':<8} {'Price':<12} {'Total':<12}\n")
-                txt.insert(END, "-"*75+"\n")
+                txt.insert(END, f"{'Date':<20} {'User':<10} {'Qty':<5} {'Price':<10} {'Total':<10}\n")
+                txt.insert(END, "-"*60+"\n")
                 for row in sales:
-                    txt.insert(END, f"{row[0]:<20} {row[1]:<15} {row[2]:<8} {row[3]:<12.2f} {row[4]:<12.2f}\n")
+                    txt.insert(END, f"{row[0]:<20} {row[1]:<10} {row[2]:<5} {row[3]:<10.2f} {row[4]:<10.2f}\n")
                 txt.config(state="disabled")
-            
-            Button(btn_frm, text="Receive/Add Stock", command=do_save, bg='#27ae60', fg='white', 
-                   font=('Arial', 10, 'bold'), padx=15, pady=5).pack(side='left', padx=5)
-            Button(btn_frm, text="Delete Item", command=do_delete, bg='#e74c3c', fg='white', 
-                   font=('Arial', 10, 'bold'), padx=15, pady=5).pack(side='left', padx=5)
-            Button(btn_frm, text="Sales History", command=show_sales_history, bg='#3498db', fg='white', 
-                   font=('Arial', 10, 'bold'), padx=15, pady=5).pack(side='left', padx=5)
-            Button(btn_frm, text="Refresh List", command=refresh_list, bg='#95a5a6', fg='white', 
-                   font=('Arial', 10, 'bold'), padx=15, pady=5).pack(side='left', padx=5)
-            Button(btn_frm, text="Close", command=win.destroy, bg='#7f8c8d', fg='white', 
-                   font=('Arial', 10, 'bold'), padx=15, pady=5).pack(side='right', padx=5)
+            Button(win, text="Sales History", command=show_item_sales).grid(row=7, column=0, columnspan=3, pady=5)
 
         # Advanced stock analytics on dashboard
         def show_stock_analytics():
@@ -1007,56 +867,29 @@ def show_main_app():
             else:
                 messagebox.showinfo("Low Stock Alert", "All items are sufficiently stocked.")
 
-        def clear_all_stock():
-            """Admin-only: Wipe everything - clear inventory and delete all sales records."""
-            import sqlite3
-            from tkinter import simpledialog
-            import sales_utils
-            uname = simpledialog.askstring("Admin Required", "Enter admin username:", parent=root)
-            if not uname:
-                return
-            user = sales_utils.get_user(uname)
-            if not user or user.get('role') != 'admin':
-                messagebox.showerror("Access Denied", "Admin account required.")
-                return
-            pwd = simpledialog.askstring("Authentication", "Enter admin password:", parent=root, show='*')
-            if not pwd or not sales_utils.check_password(pwd, user['password_hash']):
-                messagebox.showerror("Access Denied", "Invalid credentials.")
-                return
-            if not messagebox.askyesno("Confirm Complete Wipe", 
-                "This will:\n"
-                "- Set ALL inventory quantities to 0\n"
-                "- Delete ALL sales records\n"
-                "- Delete ALL sale items\n"
-                "- Wipe ALL sales history\n\n"
-                "This action CANNOT be undone!\n\n"
-                "Continue?"):
-                return
+        def export_stock_report():
+            import csv
+            import os
+            from datetime import datetime
+            from sales_utils import get_all_stock
+            
+            # Create exports directory if it doesn't exist
+            if not os.path.exists('exports'):
+                os.makedirs('exports')
+            
+            stock_list = get_all_stock()
+            today = datetime.now().strftime('%Y-%m-%d')
+            path = f"exports/stock_report_{today}.csv"
+            
             try:
-                conn = sqlite3.connect(sales_utils.DB_NAME)
-                cur = conn.cursor()
-                # Clear inventory quantities
-                cur.execute("UPDATE inventory SET quantity=0")
-                # Delete all sale items first (due to foreign key constraints)
-                cur.execute("DELETE FROM sale_items")
-                # Delete all sales records
-                cur.execute("DELETE FROM sales")
-                # Also clear legacy sales table if it exists
-                try:
-                    cur.execute("DELETE FROM sales_legacy")
-                except sqlite3.OperationalError:
-                    pass  # Table might not exist
-                conn.commit()
-                conn.close()
-                messagebox.showinfo("Complete Wipe Successful", 
-                    "All data has been wiped:\n"
-                    "- Inventory quantities set to 0\n"
-                    "- All sales records deleted\n"
-                    "- All sale items deleted\n\n"
-                    "You can now start fresh!")
+                with open(path, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(['Item', 'Quantity', 'Category'])
+                    for item, qty, cat in stock_list:  # Fixed: unpack 3 values
+                        writer.writerow([item, qty, cat])
+                messagebox.showinfo("Export Stock Report", f"Stock report exported to:\n{path}")
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to wipe data: {e}")
-
+                messagebox.showerror("Export Error", f"Failed to export stock report:\n{str(e)}")
 
         # Admin control panel
         admin_frame = tk.LabelFrame(main_frame, text="Admin Control Panel", font=('Arial', 12, 'bold'), 
@@ -1067,7 +900,7 @@ def show_main_app():
         row1_frame = tk.Frame(admin_frame, bg='#f0f0f0')
         row1_frame.pack(fill='x', pady=(0, 10))
         
-        tk.Button(row1_frame, text="View All Sales", command=view_sales, 
+        tk.Button(row1_frame, text="View All Sales", command=view_sales_modern, 
                  bg='#3498db', fg='white', font=('Arial', 10, 'bold'), pady=8).pack(side='left', fill='x', expand=True, padx=(0, 5))
         tk.Button(row1_frame, text="Analytics Dashboard", command=dashboard_prompt, 
                  bg='#9b59b6', fg='white', font=('Arial', 10, 'bold'), pady=8).pack(side='left', fill='x', expand=True, padx=5)
@@ -1082,14 +915,14 @@ def show_main_app():
         
         tk.Button(row2_frame, text="Export All Sales", command=export_all_sales, 
                  bg='#27ae60', fg='white', font=('Arial', 10, 'bold'), pady=8).pack(side='left', fill='x', expand=True, padx=(0, 5))
-        tk.Button(row2_frame, text="Clear All Stock (Admin)", command=clear_all_stock, 
-                 bg='#c0392b', fg='white', font=('Arial', 10, 'bold'), pady=8).pack(side='left', fill='x', expand=True, padx=(5, 0))
+        tk.Button(row2_frame, text="Export Stock Report", command=export_stock_report, 
+                 bg='#16a085', fg='white', font=('Arial', 10, 'bold'), pady=8).pack(side='left', fill='x', expand=True, padx=(5, 0))
         
         # Row 3: Inventory management
         row3_frame = tk.Frame(admin_frame, bg='#f0f0f0')
         row3_frame.pack(fill='x', pady=(0, 10))
         
-        tk.Button(row3_frame, text="Stock Management", command=manage_stock, 
+        tk.Button(row3_frame, text="Add/Edit Stock", command=add_stock, 
                  bg='#f39c12', fg='white', font=('Arial', 10, 'bold'), pady=8).pack(side='left', fill='x', expand=True, padx=(0, 5))
         tk.Button(row3_frame, text="Check Low Stock", command=show_low_stock_alerts, 
                  bg='#e74c3c', fg='white', font=('Arial', 10, 'bold'), pady=8).pack(side='left', fill='x', expand=True, padx=5)
@@ -1715,7 +1548,7 @@ def create_cashier_interface(main_frame, root):
         add_hover_effect(dec_btn, '#e74c3c', '#c0392b')
         add_hover_effect(inc_btn, '#27ae60', '#2ecc71')
         add_hover_effect(add_btn, '#3498db', '#2980b9')
-        add_hover_effect(cancel_btn, '#95a5a6', '#7f8c8d')
+        add_hover_effect(cancel_btn, '#95a5a6', '#7f8d8d')
         
         # Select all text when focusing on qty entry
         qty_entry.bind("<FocusIn>", lambda e: qty_entry.selection_range(0, tk.END))
@@ -1992,58 +1825,85 @@ def create_cashier_interface(main_frame, root):
     populate_items("All Items")
 
 # --- App Start ---
-if not os.path.exists('bar_sales.db'):
-    from tkinter import Tk
-    warn_root = Tk()
-    warn_root.withdraw()
-    messagebox.showwarning('Database Missing', 'Warning: bar_sales.db was missing! A new database will be created.')
-    sales_utils.log_audit_event('WARNING: bar_sales.db was missing on app start. New database created.')
-    warn_root.destroy()
+# Replace the original startup code with a guarded main() and top-level error handler.
 
-sales_utils.init_db()
-sales_utils.backup_today_sales()
+def main():
+    # perform startup tasks and open the login window
+    # (keeps existing UI code for the login window below)
+    try:
+        if not os.path.exists('bar_sales.db'):
+            from tkinter import Tk
+            warn_root = Tk()
+            warn_root.withdraw()
+            messagebox.showwarning('Database Missing', 'Warning: bar_sales.db was missing! A new database will be created.')
+            sales_utils.log_audit_event('WARNING: bar_sales.db was missing on app start. New database created.')
+            warn_root.destroy()
 
-# Seed default users in DB if missing (prevents reliance on hardcoded users)
-try:
-    if not sales_utils.get_user('admin'):
-        sales_utils.create_user('admin', 'admin123', 'admin')
-    if not sales_utils.get_user('cashier'):
-        sales_utils.create_user('cashier', 'cashier123', 'cashier')
-except Exception:
-    pass
+        sales_utils.init_db()
+        sales_utils.backup_today_sales()
 
-import atexit
-def on_app_close():
-    sales_utils.backup_today_sales()
-    sales_utils.log_audit_event('App closed and daily backup created.')
-atexit.register(on_app_close)
+        # Seed default users in DB if missing (prevents reliance on hardcoded users)
+        try:
+            if not sales_utils.get_user('admin'):
+                sales_utils.create_user('admin', 'admin123', 'admin')
+            if not sales_utils.get_user('cashier'):
+                sales_utils.create_user('cashier', 'cashier123', 'cashier')
+        except Exception:
+            pass
 
-login_window = tk.Tk()
-login_window.title("Login - Bar Sales App")
+        import atexit
+        def on_app_close():
+            sales_utils.backup_today_sales()
+            sales_utils.log_audit_event('App closed and daily backup created.')
+        atexit.register(on_app_close)
 
-# Login form
-login_frame = tk.Frame(login_window)
-login_frame.pack(padx=20, pady=20)
+        # --- Create login window (same as before) ---
+        global login_window, entry_username, entry_password
+        login_window = tk.Tk()
+        login_window.title("Login - Bar Sales App")
 
-login_frame.grid_columnconfigure(1, weight=1)
+        # Login form
+        login_frame = tk.Frame(login_window)
+        login_frame.pack(padx=20, pady=20)
 
-login_frame_label = tk.Label(login_frame, text="Please login to continue", font=("Arial", 12, "bold"))
-login_frame_label.grid(row=0, column=0, columnspan=2, pady=(0, 10))
+        login_frame.grid_columnconfigure(1, weight=1)
 
-label_username = tk.Label(login_frame, text="Username:")
-label_username.grid(row=1, column=0, sticky="e")
-entry_username = tk.Entry(login_frame)
-entry_username.grid(row=1, column=1)
+        login_frame_label = tk.Label(login_frame, text="Please login to continue", font=("Arial", 12, "bold"))
+        login_frame_label.grid(row=0, column=0, columnspan=2, pady=(0, 10))
 
-label_password = tk.Label(login_frame, text="Password:")
-label_password.grid(row=2, column=0, sticky="e")
-entry_password = tk.Entry(login_frame, show="*")
-entry_password.grid(row=2, column=1)
+        label_username = tk.Label(login_frame, text="Username:")
+        label_username.grid(row=1, column=0, sticky="e")
+        entry_username = tk.Entry(login_frame)
+        entry_username.grid(row=1, column=1)
 
-login_btn = tk.Button(login_frame, text="Login", command=login)
-login_btn.grid(row=3, column=0, columnspan=2, pady=10)
+        label_password = tk.Label(login_frame, text="Password:")
+        label_password.grid(row=2, column=0, sticky="e")
+        entry_password = tk.Entry(login_frame, show="*")
+        entry_password.grid(row=2, column=1)
 
-# Bind Enter to login on bottom UI
-entry_password.bind('<Return>', lambda e: login())
+        login_btn = tk.Button(login_frame, text="Login", command=login)
+        login_btn.grid(row=3, column=0, columnspan=2, pady=10)
 
-login_window.mainloop()
+        # Bind Enter to login on bottom UI
+        entry_password.bind('<Return>', lambda e: login())
+
+        # Start the GUI loop
+        login_window.mainloop()
+
+    except Exception as exc:
+        # Print traceback to console and show a messagebox so you can see the error
+        import traceback
+        trace = traceback.format_exc()
+        print(trace)
+        # Use a temporary root for messagebox if no Tk root exists
+        try:
+            tmp = tk.Tk()
+            tmp.withdraw()
+            messagebox.showerror("Startup Error", f"Application failed to start:\n{str(exc)}\n\nSee console for details.")
+            tmp.destroy()
+        except Exception:
+            # If even messagebox fails, just print
+            print("Additionally failed to show messagebox.")
+
+if __name__ == "__main__":
+    main()
