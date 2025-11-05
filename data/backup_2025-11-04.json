@@ -1,10 +1,10 @@
 [
   {
-    "id": 25,
-    "transaction_id": "TX-20251104131843-32b820",
+    "id": 29,
+    "transaction_id": "TX-20251104171906-58XK",
     "cashier": "comfort",
-    "total": 4000.0,
-    "timestamp": "2025-11-04 13:18:43",
+    "total": 0.0,
+    "timestamp": "2025-11-04 17:19:06",
     "status": "COMPLETED",
     "void_reason": null,
     "void_authorized_by": null,
@@ -15,45 +15,7 @@
     "authorized_by": null,
     "original_sale_id": null,
     "payment_method": "Mobile Money",
-    "reference_no": "3338383",
-    "comment": "MTN"
-  },
-  {
-    "id": 26,
-    "transaction_id": "TX-20251104145230-b05109",
-    "cashier": "comfort",
-    "total": 3000.0,
-    "timestamp": "2025-11-04 14:52:30",
-    "status": "COMPLETED",
-    "void_reason": null,
-    "void_authorized_by": null,
-    "voided_at": null,
-    "is_voided": 0,
-    "adjustment_type": null,
-    "reason": null,
-    "authorized_by": null,
-    "original_sale_id": null,
-    "payment_method": "Mobile Money",
-    "reference_no": "txbnnd6564",
-    "comment": "Mtn"
-  },
-  {
-    "id": 27,
-    "transaction_id": "TX-20251104145248-03e1d0",
-    "cashier": "comfort",
-    "total": 11500.0,
-    "timestamp": "2025-11-04 14:52:48",
-    "status": "COMPLETED",
-    "void_reason": null,
-    "void_authorized_by": null,
-    "voided_at": null,
-    "is_voided": 0,
-    "adjustment_type": null,
-    "reason": null,
-    "authorized_by": null,
-    "original_sale_id": null,
-    "payment_method": "Cash",
-    "reference_no": null,
-    "comment": null
+    "reference_no": "ytytt7",
+    "comment": "gkgl"
   }
 ]

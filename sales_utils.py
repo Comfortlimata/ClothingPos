@@ -159,7 +159,39 @@ def hash_password(password):
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 def check_password(password, password_hash):
-    return bcrypt.checkpw(password.encode(), password_hash.encode())
+    """Backward-compatible password check.
+    Supports bcrypt (preferred), legacy SHA-256 hex, and legacy plaintext.
+    """
+    if not password_hash:
+        return False
+    h = password_hash.strip()
+    try:
+        # bcrypt markers
+        if h.startswith(("$2a$", "$2b$", "$2y$")):
+            return bcrypt.checkpw(password.encode(), h.encode())
+        # legacy SHA-256 hex
+        if len(h) == 64 and all(c in "0123456789abcdefABCDEF" for c in h):
+            return hashlib.sha256(password.encode()).hexdigest() == h.lower()
+        # fallback: plaintext
+        return password == h
+    except Exception:
+        return False
+
+def verify_password(username: str, input_password: str) -> bool:
+    """Verify password and upgrade legacy hashes to bcrypt on success."""
+    user = get_user(username)
+    if not user:
+        return False
+    ok = check_password(input_password, user['password_hash'])
+    if ok:
+        # Upgrade to bcrypt if not already bcrypt
+        h = (user['password_hash'] or "").strip()
+        if not h.startswith(("$2a$", "$2b$", "$2y$")):
+            try:
+                reset_user_password(username, input_password)
+            except Exception:
+                pass
+    return ok
 
 def create_user(username, password, role):
     conn = sqlite3.connect(DB_NAME, timeout=10)
@@ -517,6 +549,29 @@ def void_sale_transaction(sale_id: int, reason: str, requested_by: str, authoriz
     except Exception as e:
         conn.rollback()
         return False, f"Error voiding sale: {e}"
+    finally:
+        conn.close()
+
+def wipe_sales_and_inventory() -> bool:
+    """Delete all sales, sale_items and inventory rows. Returns True on success."""
+    ensure_cart_schema()
+    conn = sqlite3.connect(DB_NAME, timeout=30)
+    cur = conn.cursor()
+    try:
+        # Ensure we run in a transaction
+        cur.execute("BEGIN IMMEDIATE")
+        cur.execute("DELETE FROM sale_items")
+        cur.execute("DELETE FROM sales")
+        cur.execute("DELETE FROM inventory")
+        conn.commit()
+        return True
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        print(f"wipe_sales_and_inventory error: {e}")
+        return False
     finally:
         conn.close()
 

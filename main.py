@@ -5,6 +5,12 @@ import sales_utils
 import sales_corrections
 import os
 
+# Ensure database is initialized before application starts
+try:
+    sales_utils.init_db()
+except Exception as e:
+    print(f"Database initialization error: {e}")
+
 # Hardcoded users and roles
 USERS = {
     'admin': {'password': 'admin123', 'role': 'admin'},
@@ -53,9 +59,9 @@ def login():
     username = entry_username.get()
     password = entry_password.get()
     # Prefer database users if present
-    from sales_utils import get_user, check_password
+    from sales_utils import get_user, verify_password
     db_user = get_user(username)
-    if db_user and check_password(password, db_user['password_hash']):
+    if db_user and verify_password(username, password):
         current_user['username'] = username
         current_user['role'] = db_user['role']
         login_window.destroy()
@@ -1211,11 +1217,61 @@ def show_main_app():
         tk.Button(row3_frame, text="Stock Analytics", command=show_stock_analytics, 
                  bg='#34495e', fg='white', font=('Arial', 10, 'bold'), pady=8).pack(side='left', fill='x', expand=True, padx=(5, 0))
         
-        # Row 4: Enhanced reporting
+        # Row 4: Dangerous operations (Clear everything)
         row4_frame = tk.Frame(admin_frame, bg='#f0f0f0')
         row4_frame.pack(fill='x', pady=(10, 0))
-        
-        # Enhanced reports feature removed. (Button and handler deleted)
+
+        def clear_everything_admin():
+            """Admin-only: backup then wipe sales, sale_items and inventory (destructive)."""
+            if current_user.get('role') != 'admin':
+                messagebox.showerror("Access Denied", "Admin privileges required.")
+                return
+
+            from tkinter.simpledialog import askstring
+            pw = askstring("Confirm Clear All", "Enter ADMIN password to clear ALL sales & stock:", show="*")
+            if not pw:
+                return
+
+            # Verify admin password (DB user preferred, fallback to hardcoded)
+            try:
+                db_admin = sales_utils.get_user('admin')
+                verified = False
+                if db_admin:
+                    verified = sales_utils.check_password(pw, db_admin['password_hash'])
+                else:
+                    verified = (pw == USERS.get('admin', {}).get('password'))
+                if not verified:
+                    messagebox.showerror("Access Denied", "Incorrect admin password.")
+                    return
+            except Exception as e:
+                messagebox.showerror("Error", f"Password verification failed: {e}")
+                return
+
+            if not messagebox.askyesno("FINAL CONFIRMATION",
+                    "THIS ACTION IS IRREVERSIBLE.\n\nThis will DELETE ALL sales records and CLEAR THE INVENTORY.\n\nAre you ABSOLUTELY sure?"):
+                return
+
+            try:
+                backup_path = None
+                try:
+                    backup_path = sales_utils.backup_today_sales()
+                except Exception:
+                    backup_path = None
+
+                ok = sales_utils.wipe_sales_and_inventory()
+                if ok:
+                    sales_utils.log_audit_event(f"CLEAR EVERYTHING executed by {current_user.get('username')}")
+                    msg = "✅ All sales and stock cleared."
+                    if backup_path:
+                        msg += f"\nBackup saved to: {backup_path}"
+                    messagebox.showinfo("Clear Complete", msg)
+                else:
+                    messagebox.showerror("Clear Failed", "An error occurred while clearing data. Check logs.")
+            except Exception as e:
+                messagebox.showerror("Clear Error", f"Failed to clear data: {e}")
+
+        tk.Button(row4_frame, text="⚠️ CLEAR EVERYTHING (Admin)", command=clear_everything_admin,
+                 bg='#b91c1c', fg='white', font=('Arial', 12, 'bold'), pady=10).pack(fill='x', padx=40)
 
     root.mainloop()
 
